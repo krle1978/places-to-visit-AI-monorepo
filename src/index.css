@@ -1,0 +1,41 @@
+:root {
+  --ink: #0f1e1a;
+  --muted: #4a5a50;
+  --accent: #11854d;
+  --accent-strong: #0f6b3e;
+  --paper: #f9f4ea;
+  --border: #ddd3c3;
+
+  font-family: "Trebuchet MS", "Lucida Sans Unicode", "Lucida Grande", "Verdana", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--ink);
+  background-color: #efe9df;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #fdf7ee, #efe6d7 55%, #e3d8c8 100%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+button {
+  font-family: inherit;
+}
