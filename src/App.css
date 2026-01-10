@@ -11,6 +11,22 @@
   padding: 2.5rem 6vw 1.5rem;
 }
 
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.logout-btn {
+  margin-left: auto;
+}
+
 .brand {
   font-family: "Georgia", "Times New Roman", serif;
   text-transform: uppercase;
@@ -135,6 +151,29 @@
   width: clamp(210px, 38vw, 320px);
   height: auto;
   display: block;
+}
+
+.city-search {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 2px solid var(--accent);
+  border-radius: 18px;
+}
+
+#city-search-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0.7rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  font-family: inherit;
+}
+
+#city-search-btn {
+  width: 100%;
 }
 
 #category-selector {

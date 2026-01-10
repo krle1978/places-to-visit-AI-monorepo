@@ -125,53 +125,20 @@ export default function App() {
     });
 
     const gpsBtn = document.getElementById("gpsBtn");
+    const citySearchInput = document.getElementById("city-search-input");
+    const citySearchBtn = document.getElementById("city-search-btn");
 
-    const header = document.getElementById("route-planner-toggle");
     const panel = document.getElementById("route-planner-panel");
-    const arrow = document.getElementById("route-arrow");
     const openBtn = document.getElementById("toggle-planner-btn");
 
-    if (panel && header && arrow) {
-      const togglePanel = () => {
-        panel.classList.toggle("collapsed");
-        panel.classList.toggle("open");
-        arrow.classList.toggle("open");
+    if (panel && openBtn) {
+      const onOpenClick = (event) => {
+        event.stopPropagation();
+        openPlannerPanel();
       };
 
-      header.addEventListener("click", togglePanel);
-      cleanup.push(() => header.removeEventListener("click", togglePanel));
-
-      if (openBtn) {
-        const onOpenClick = (event) => {
-          event.stopPropagation();
-          panel.classList.add("open");
-          panel.classList.remove("collapsed");
-          arrow.classList.add("open");
-
-          setTimeout(() => {
-            panel.scrollIntoView({ behavior: "smooth", block: "start" });
-          }, 300);
-        };
-
-        openBtn.addEventListener("click", onOpenClick);
-        cleanup.push(() => openBtn.removeEventListener("click", onOpenClick));
-      }
-
-      const onDocClick = (event) => {
-        const target = event.target;
-        if (
-          !panel.contains(target) &&
-          !header.contains(target) &&
-          (!openBtn || !openBtn.contains(target))
-        ) {
-          panel.classList.add("collapsed");
-          panel.classList.remove("open");
-          arrow.classList.remove("open");
-        }
-      };
-
-      document.addEventListener("click", onDocClick);
-      cleanup.push(() => document.removeEventListener("click", onDocClick));
+      openBtn.addEventListener("click", onOpenClick);
+      cleanup.push(() => openBtn.removeEventListener("click", onOpenClick));
     }
 
     const countrySelect = document.getElementById("route-country");
@@ -202,9 +169,22 @@ export default function App() {
     let selectedCityObj = null;
     let pendingSelection = null;
     let countryFileMap = {};
+    let countryDataCache = {};
     let isGeoLoading = false;
     let geoContext = null;
     let isNearestLoading = false;
+    let isSearchLoading = false;
+
+    let countriesReadyDone = false;
+    let resolveCountriesReady;
+    const countriesReady = new Promise((resolve) => {
+      resolveCountriesReady = resolve;
+    });
+    const markCountriesReady = () => {
+      if (countriesReadyDone) return;
+      countriesReadyDone = true;
+      resolveCountriesReady();
+    };
 
     function parseTextBlock(text) {
       if (!text) return "<p>No data available.</p>";
@@ -389,12 +369,14 @@ export default function App() {
 
           populateCountries(countries);
           applyPendingCitySelection();
+          markCountriesReady();
         })
         .catch((err) => {
           console.error(err);
           countryFileMap = { ...countryMap };
           const fallback = Object.keys(countryMap).map((name) => ({ name, file: countryMap[name] }));
           populateCountries(fallback);
+          markCountriesReady();
         });
     }
 
@@ -744,6 +726,75 @@ export default function App() {
       return loose || null;
     }
 
+    function levenshtein(a, b) {
+      if (a === b) return 0;
+      if (!a) return b.length;
+      if (!b) return a.length;
+
+      const dp = Array.from({ length: a.length + 1 }, () => []);
+      for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+      for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
+      for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          dp[i][j] = Math.min(
+            dp[i - 1][j] + 1,
+            dp[i][j - 1] + 1,
+            dp[i - 1][j - 1] + cost
+          );
+        }
+      }
+
+      return dp[a.length][b.length];
+    }
+
+    async function findCityAcrossCountries(cityQuery) {
+      const normalizedQuery = normalizeName(cityQuery);
+      if (!normalizedQuery) return { match: null, suggestion: null };
+
+      let best = null;
+      let bestDistance = Infinity;
+
+      const entries = Object.entries(countryFileMap);
+      for (const [countryName, fileName] of entries) {
+        if (!fileName) continue;
+        let json = countryDataCache[fileName];
+        if (!json) {
+          try {
+            json = await fetchJsonWithFallback(
+              `/api/countries/${encodeURIComponent(fileName)}`
+            );
+            countryDataCache[fileName] = json;
+          } catch (err) {
+            console.error(err);
+            continue;
+          }
+        }
+
+        const cities = Array.isArray(json?.cities) ? json.cities : [];
+        for (const city of cities) {
+          const name = city?.name || "";
+          const normalized = normalizeName(name);
+          if (!normalized) continue;
+
+          if (normalized === normalizedQuery) {
+            return { match: { country: countryName, city: name }, suggestion: null };
+          }
+
+          const distance = levenshtein(normalized, normalizedQuery);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = { country: countryName, city: name };
+          }
+        }
+      }
+
+      const maxDistance = normalizedQuery.length <= 5 ? 1 : 2;
+      const suggestion = bestDistance <= maxDistance ? best : null;
+      return { match: null, suggestion };
+    }
+
     async function applyPendingCitySelection() {
       if (!pendingSelection) return;
       if (pendingSelection.country && countrySelect.value !== pendingSelection.country) return;
@@ -888,6 +939,79 @@ export default function App() {
       cleanup.push(() => gpsBtn.removeEventListener("click", onGpsClick));
     }
 
+    if (citySearchInput && citySearchBtn) {
+      const onCitySearch = async () => {
+        if (isSearchLoading) return;
+
+        const raw = citySearchInput.value.trim();
+        if (!raw) {
+          errorMsg.textContent = "Please enter a city name.";
+          return;
+        }
+
+        if (raw.length > 10) {
+          errorMsg.textContent = "City name must be 10 characters or less.";
+          return;
+        }
+
+        openPlannerPanel();
+        errorMsg.textContent = "";
+        resultWrapper.style.display = "none";
+        isSearchLoading = true;
+        citySearchBtn.disabled = true;
+
+        try {
+          await countriesReady;
+          if (!Object.keys(countryFileMap).length) {
+            errorMsg.textContent = "Country list is not ready yet.";
+            return;
+          }
+
+          const result = await findCityAcrossCountries(raw);
+          if (result.match) {
+            pendingSelection = {
+              country: result.match.country,
+              city: result.match.city,
+              autoSubmit: true
+            };
+
+            if (countrySelect.value !== result.match.country) {
+              countrySelect.value = result.match.country;
+              countrySelect.dispatchEvent(new Event("change"));
+            } else {
+              applyPendingCitySelection();
+            }
+            return;
+          }
+
+          if (result.suggestion) {
+            errorMsg.textContent = `City not found. Did you mean ${result.suggestion.city}, ${result.suggestion.country}?`;
+          } else {
+            errorMsg.textContent = "City not found.";
+          }
+        } catch (err) {
+          console.error(err);
+          errorMsg.textContent = err?.message || "Failed to find city.";
+        } finally {
+          isSearchLoading = false;
+          citySearchBtn.disabled = false;
+        }
+      };
+
+      const onCitySearchKeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onCitySearch();
+        }
+      };
+
+      citySearchBtn.addEventListener("click", onCitySearch);
+      citySearchInput.addEventListener("keydown", onCitySearchKeydown);
+
+      cleanup.push(() => citySearchBtn.removeEventListener("click", onCitySearch));
+      cleanup.push(() => citySearchInput.removeEventListener("keydown", onCitySearchKeydown));
+    }
+
     if (geoMakeBtn) {
       const onMakeLocation = async () => {
         if (!geoContext) return;
@@ -1003,7 +1127,6 @@ export default function App() {
       if (!panel) return;
       panel.classList.add("open");
       panel.classList.remove("collapsed");
-      if (arrow) arrow.classList.add("open");
 
       setTimeout(() => {
         panel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1049,6 +1172,13 @@ export default function App() {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  function logout() {
+    localStorage.removeItem("token");
+    setToken(null);
+    setUser(null);
+    setError("");
   }
 
   async function askAI() {
@@ -1116,8 +1246,13 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="site-header" data-include="/components/header.html">
-        <div className="brand">Places To Visit</div>
-        <div className="header-subtitle">Smart city travel planner for curious minds.</div>
+        <div className="header-title">
+          <div className="brand">Places To Visit</div>
+          <div className="header-subtitle">Smart city travel planner for curious minds.</div>
+        </div>
+        <button className="btn logout-btn" type="button" onClick={logout}>
+          Logout
+        </button>
       </header>
 
       <main>
@@ -1149,6 +1284,18 @@ export default function App() {
                 data-active="/buttons/IM_Here/btn_imhere_click.png"
               />
             </a>
+
+            <div className="city-search">
+              <input
+                id="city-search-input"
+                type="text"
+                maxLength={10}
+                placeholder="Type city (max 10)"
+              />
+              <button id="city-search-btn" className="btn" type="button">
+                Find This City
+              </button>
+            </div>
 
             <div id="category-selector">
               <fieldset>
@@ -1182,14 +1329,11 @@ export default function App() {
         </section>
 
         <section className="city-section route-planner-wrapper">
-          <div className="route-planner-header" id="route-planner-toggle">
+          <div className="route-planner-header">
             <h2>Choose Your Place To Visit</h2>
-            <span className="route-arrow" id="route-arrow">
-              {"\u25bc"}
-            </span>
           </div>
 
-          <div id="route-planner-panel" className="route-planner-panel collapsed">
+          <div id="route-planner-panel" className="route-planner-panel open">
             <div className="route-planner">
               <div className="route-form-wrapper">
                 <div className="route-form">
