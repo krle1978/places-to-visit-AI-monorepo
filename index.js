@@ -12,12 +12,14 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { requireAuth } from "./middleware/auth.js";
+import { registerWebhookRoutes } from "./routes/webhook.js";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+registerWebhookRoutes(app);
 
 app.get("/", (req, res) => {
   res.json({
@@ -920,7 +922,8 @@ app.get("/api/auth/confirm", async (req, res) => {
         id: entry.id,
         email: entry.email,
         passwordHash: entry.passwordHash,
-        plan: entry.plan || "free"
+        plan: entry.plan || "free",
+        tokens: Number(entry.tokens || 0)
       };
       users.push(user);
       await writeJsonFile(USERS_PATH, users);
@@ -981,7 +984,8 @@ app.post("/api/auth/login", async (req, res) => {
     token,
     user: {
       email: user.email,
-      plan: user.plan
+      plan: user.plan,
+      tokens: Number(user.tokens || 0)
     }
   });
 });
