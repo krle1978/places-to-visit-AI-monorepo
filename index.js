@@ -385,8 +385,26 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return 6371 * c;
 }
 
+const PLAN_RANK = {
+  free: 0,
+  basic: 1,
+  premium: 2,
+  premium_plus: 3
+};
+
 function planAllows(plan, allowed) {
-  return allowed.includes(plan);
+  const rank = PLAN_RANK[plan] ?? 0;
+  const allowedRanks = allowed
+    .map((key) => PLAN_RANK[key])
+    .filter((value) => Number.isFinite(value));
+
+  if (!allowedRanks.length) return false;
+
+  const onlyFree = allowedRanks.every((value) => value === PLAN_RANK.free);
+  if (onlyFree) return rank === PLAN_RANK.free;
+
+  const minAllowed = Math.min(...allowedRanks);
+  return rank >= minAllowed;
 }
 
 app.post("/api/city/add", requireAuth, async (req, res) => {
