@@ -9,70 +9,89 @@
 </head>
 <body>
 
-  <!-- Hero Section -->
-  <header class="hero">
-    <img src="/pics/donations/Hero_picture.png" alt="Support Hero Image" class="hero-img">
-    <div class="hero-text">
-      <h1>Your small donation can save someone’s life from diabetes complications.</h1>
-    </div>
-  </header>
-  
-  <!-- Navigation -->
-  <nav class="main-nav">
-    <ul class="menu">
-      <li><a href="index.html">Home</a></li>
-      <li><a href="diabetes-prediction.html">Diabetes Prediction</a></li>      
-      <li><a href="statistics.html">Statistics</a></li>
-      <li><a href="charts.html">Charts</a></li>
-      <li><a href="recipes.html">Recipes</a></li>
-      <li><a href="donations.html" class="active">Donations</a></li>
-    </ul>
-  </nav>
+  <a class="home-btn" href="/">Home</a>
 
+ 
   <img src="/logo/Places To Visit Logo_02.png" alt="Logo" class="logo-icon">
   
- <!-- Progress Section with Milestones -->
-  <section class="progress-section">
-    <p>Goal: €5000 → Collected: €3200</p>
-    <div class="progress-wrapper">
-      <div class="milestones">
-        <span class="milestone">💉</span>
-        <span class="milestone">🍎</span>
-        <span class="milestone">🏋️‍♂️</span>
-        <span class="milestone">⭐</span>
-      </div>
-      <div class="progress-bar">
-        <div class="progress"></div>
-      </div>
-      <div class="percent-labels">
-        <span>25%</span>
-        <span>50%</span>
-        <span>75%</span>
-        <span>100%</span>
-      </div>
-    </div>
-  </section>
-
+ 
   <!-- Main Donations Section -->
   <main class="donations">
 
-    <!-- Monthly Support Highlight -->
+    <!-- Subscription Plans -->
     <section class="donation-card monthly-card">
-      <h2>Monthly Support</h2>
-      <p>Become a monthly supporter and help us grow steadily 🙌</p>
-      <div class="btn-group">
-        <div class="paypal-donate">
-          <p>Basic 5€</p>
-          <div id="paypal-button-container-5"></div>
-        </div>
-        <div class="paypal-donate">
-          <p>Premium 10€</p>
-          <div id="paypal-button-container-10"></div>
-        </div>
-        <div class="paypal-donate">
-          <p>Premium Plus 20€</p>
-          <div id="paypal-button-container-20"></div>
-        </div>
+      <h2>Subscription Plan</h2>
+      <p>Choose the support level that fits you best and unlock more features.</p>
+      <div class="subscription-grid">
+        <article class="plan-card" data-plan="free">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="free" aria-label="Select Free plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Free 0€</h3>
+            <p class="plan-price">0 Tokens</p>
+          </div>
+          <p class="plan-summary">Start with ours own recommandations.</p>
+          <ul class="permissions">
+            <li>Access to Our Tour Data Base recommandation</li>
+          </ul>
+        </article>
+        <article class="plan-card" data-plan="basic">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="basic" aria-label="Select Basic plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Basic 5€</h3>
+            <p class="plan-price">7 Tokens</p>
+          </div>
+          <p class="plan-summary">Support the project and uses queries for cities that are not in our tourist database.</p>
+          <ul class="permissions">
+            <li>Start with ours own recommandations.</li>
+            <li>If a city tour recommendation does not exist in our database, be the first to see a recommendation for the desired city, created with the help of AI.</li>
+          </ul>
+          <div class="plan-cta">
+            <div id="paypal-button-container-5"></div>
+          </div>
+        </article>
+        <article class="plan-card" data-plan="premium">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="premium" aria-label="Select Premium plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Premium 10€</h3>
+            <p class="plan-price">20 Tokens</p>
+          </div>
+          <p class="plan-summary">Unlock deeper insights and personalized guidance.</p>
+          <ul class="permissions">
+            <li>Everything in Free and Basic</li>
+            <li>Download your city tour plan in PDF format.</li>
+            <li>The possibility of creating your unique tour plan with your unique interests.</li>
+          </ul>
+          <div class="plan-cta">
+            <div id="paypal-button-container-10"></div>
+          </div>
+        </article>
+        <article class="plan-card" data-plan="premium_plus">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="premium_plus" aria-label="Select Premium Plus plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Premium Plus 20€</h3>
+            <p class="plan-price">50 Tokens</p>
+          </div>
+          <p class="plan-summary">Maximize your impact and shape future features.</p>
+          <ul class="permissions">
+            <li>Everything in Premium</li>
+            <li>50 Tokens for AI queries.</li>
+          </ul>
+          <div class="plan-cta">
+            <div id="paypal-button-container-20"></div>
+          </div>
+        </article>
       </div>
       <div class="trust">
         <img src="/subscription/secure-icon.png" alt="Secure Payment" class="trust-icon">
@@ -134,19 +153,7 @@
     <p>&copy; 2025 - Rade Krstić, MSc of Information Technology and Systems</p>
   </footer>
 
-  <!-- Hamburger Button -->
-  <button class="hamburger">☰</button>
-
-  <!-- Mobile Menu -->
-  <ul class="menu_mobile">
-    <li><a href="index.html">Home</a></li>
-    <li><a href="diabetes-prediction.html">Diabetes Prediction</a></li>
-    <li><a href="statistics.html">Statistics</a></li>
-    <li><a href="charts.html">Charts</a></li>
-    <li><a href="recipes.html">Recipes</a></li>
-    <li><a href="donations.html" class="active">Donations</a></li>
-  </ul>
-
+ 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://www.paypal.com/sdk/js?client-id=AfeSNpvMy3l1VAOQl8Jxp3_3Bad_PKoshj1eCajG1AqGQGrtnFOODuD-zDZ8wyA9Qh4xmzxUYs0CTAXN&currency=EUR"></script>
   <script src="/subscription.js"></script>

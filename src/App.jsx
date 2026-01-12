@@ -1391,8 +1391,8 @@ export default function App() {
     }
   }
 
-  const canGenerateCity = plan === "basic" || plan === "premium";
-  const isPremium = plan === "premium";
+  const isPremium = plan === "premium" || plan === "premium_plus";
+  const canGenerateCity = plan === "basic" || isPremium;
 
   const openSubscriptions = () => {
     window.location.href = "/subscription.html";

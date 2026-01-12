@@ -83,9 +83,54 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  const PLAN_BY_AMOUNT = {
+    5: "basic",
+    10: "premium",
+    20: "premium_plus"
+  };
+
+  function decodeTokenPayload(token) {
+    if (!token) return null;
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    try {
+      const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+      const json = atob(padded);
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  }
+
+  function getPlanFromToken(token) {
+    return decodeTokenPayload(token)?.plan || "free";
+  }
+
+  function setSelectedPlan(planKey) {
+    const cards = document.querySelectorAll(".plan-card");
+    cards.forEach((card) => {
+      const key = card.dataset.plan;
+      const radio = card.querySelector('input[type="radio"]');
+      const isSelected = key === planKey;
+      if (radio) {
+        radio.checked = isSelected;
+      }
+      card.classList.toggle("selected", isSelected);
+    });
+  }
+
+  const planRadios = document.querySelectorAll('input[name="plan"]');
+  planRadios.forEach((radio) => {
+    radio.addEventListener("change", () => setSelectedPlan(radio.value));
+  });
+
+  const initialPlan = getPlanFromToken(localStorage.getItem("token"));
+  setSelectedPlan(initialPlan);
+
   async function creditTokens(amount) {
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) return { ok: false };
 
     try {
       const res = await fetch("/api/payments/paypal/credit", {
@@ -97,16 +142,38 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ amount })
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        console.warn("Failed to credit tokens", await res.json().catch(() => ({})));
+        console.warn("Failed to credit tokens", data);
+        return { ok: false };
       }
+
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
+
+      const planKey =
+        data.plan ||
+        PLAN_BY_AMOUNT[amount] ||
+        getPlanFromToken(data.token || localStorage.getItem("token")) ||
+        "free";
+
+      setSelectedPlan(planKey);
+
+      return {
+        ok: true,
+        plan: planKey,
+        totalTokens: data.totalTokens,
+        tokensAdded: data.tokensAdded
+      };
     } catch (err) {
       console.warn("Token credit request failed", err);
+      return { ok: false };
     }
   }
 
   // PayPal Buttons
-  function renderPayPalButton(containerId, amount) {
+  function renderPayPalButton(containerId, amount, planKey) {
     if (!window.paypal?.Buttons) return;
     window.paypal
       .Buttons({
@@ -116,7 +183,11 @@ document.addEventListener("DOMContentLoaded", () => {
           layout: "vertical",
           label: "donate"
         },
+        onClick: function () {
+          setSelectedPlan(planKey);
+        },
         createOrder: function (data, actions) {
+          setSelectedPlan(planKey);
           return actions.order.create({
             purchase_units: [
               {
@@ -131,12 +202,16 @@ document.addEventListener("DOMContentLoaded", () => {
         },
         onApprove: function (data, actions) {
           return actions.order.capture().then(async function (details) {
-            await creditTokens(amount);
+            const creditResult = await creditTokens(amount);
+            const planToApply = creditResult?.plan || planKey;
+            setSelectedPlan(planToApply);
             window.location.href =
               "thankyou.html?amount=" +
               amount +
               "&name=" +
-              encodeURIComponent(details.payer.name.given_name);
+              encodeURIComponent(details.payer.name.given_name) +
+              "&plan=" +
+              encodeURIComponent(planToApply);
           });
         },
         onError: function (err) {
@@ -147,9 +222,9 @@ document.addEventListener("DOMContentLoaded", () => {
       .render(containerId);
   }
 
-  renderPayPalButton("#paypal-button-container-5", 5);
-  renderPayPalButton("#paypal-button-container-10", 10);
-  renderPayPalButton("#paypal-button-container-20", 20);
+  renderPayPalButton("#paypal-button-container-5", 5, "basic");
+  renderPayPalButton("#paypal-button-container-10", 10, "premium");
+  renderPayPalButton("#paypal-button-container-20", 20, "premium_plus");
 
   // Bank Transfer QR Code with 10 EUR preset
   const bankQR = document.getElementById("bank-qr");
