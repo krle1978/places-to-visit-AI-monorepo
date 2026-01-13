@@ -27,11 +27,16 @@
   margin-left: auto;
 }
 
+.logout-btn .stateful-btn-image {
+  width: clamp(110px, 12vw, 160px);
+  height: auto;
+  display: block;
+}
+
 .brand {
-  font-family: "Georgia", "Times New Roman", serif;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-size: clamp(1.4rem, 3vw, 2.4rem);
+  max-width: clamp(180px, 24vw, 320px);
+  height: auto;
+  display: block;
 }
 
 .header-subtitle {
@@ -152,10 +157,63 @@
   color: #9db7ab;
 }
 
+.image-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.login-card .image-btn .stateful-btn-image {
+  width: min(100%, 240px);
+  height: auto;
+  display: block;
+}
+
+.auth-tabs {
+  display: inline-flex;
+  gap: 0.4rem;
+  background: #f4efe6;
+  padding: 0.35rem;
+  border-radius: 999px;
+  align-self: flex-start;
+}
+
+.auth-tab {
+  border: none;
+  background: transparent;
+  padding: 0.5rem 1.2rem;
+  border-radius: 999px;
+  font-weight: 600;
+  color: #3b3b3b;
+  cursor: pointer;
+}
+
+.auth-tab.active {
+  background: #11854d;
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(17, 133, 77, 0.25);
+}
+
 .image-btn-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.image-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.image-btn .stateful-btn-image {
+  width: clamp(180px, 40vw, 260px);
+  height: auto;
+  display: block;
 }
 
 .image-btn-link img {
@@ -197,6 +255,13 @@
 
 #city-search-btn {
   width: 100%;
+  justify-content: center;
+}
+
+#city-search-btn .stateful-btn-image {
+  width: min(100%, 300px);
+  height: auto;
+  display: block;
 }
 
 #category-selector {
@@ -261,6 +326,12 @@
 
 .route-form button {
   margin-top: 1.5rem;
+}
+
+#route-submit .stateful-btn-image {
+  width: min(100%, 300px);
+  height: auto;
+  display: block;
 }
 
 .route-error-message {

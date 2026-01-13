@@ -73,10 +73,12 @@ function getPlanFromToken(token) {
 export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
+  const [activeAuthTab, setActiveAuthTab] = useState("login");
 
   const [error, setError] = useState("");
   const [signupMessage, setSignupMessage] = useState("");
@@ -116,8 +118,6 @@ export default function App() {
   }, [token, plan]);
 
   useEffect(() => {
-    if (!token) return;
-
     const cleanup = [];
     const statefulImages = document.querySelectorAll("img.stateful-btn-image");
 
@@ -170,6 +170,14 @@ export default function App() {
         img.removeEventListener("touchcancel", onTouchCancel);
       });
     });
+
+    return () => cleanup.forEach((fn) => fn());
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const cleanup = [];
 
     const gpsBtn = document.getElementById("gpsBtn");
     const citySearchInput = document.getElementById("city-search-input");
@@ -1246,6 +1254,18 @@ export default function App() {
       setSignupError("Email and password required.");
       return;
     }
+    if (!isValidEmail(email)) {
+      setSignupError("Please enter a valid email address.");
+      return;
+    }
+    if (password.length < 8) {
+      setSignupError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setSignupError("Passwords do not match.");
+      return;
+    }
 
     setSignupLoading(true);
     try {
@@ -1270,6 +1290,18 @@ export default function App() {
     setError("");
     setSignupMessage("");
     setSignupError("");
+    if (!email || !password) {
+      setError("Email and password required.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
     try {
       const res = await fetch(`${API}/api/auth/login`, {
         method: "POST",
@@ -1296,6 +1328,13 @@ export default function App() {
     setPlan("free");
     setError("");
   }
+
+  const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  const emailIsValid = isValidEmail(email);
+  const passwordIsValid = password.length >= 8;
+  const confirmMatches = password === confirmPassword;
+  const canLogin = emailIsValid && passwordIsValid;
+  const canSignup = emailIsValid && passwordIsValid && confirmMatches && !signupLoading;
 
   async function generateCityRoute(cityName = missingCity) {
     if (!cityName || cityGenerateLoading) return;
@@ -1402,54 +1441,194 @@ export default function App() {
     return (
       <div className="login-shell">
         <div className="login-card">
-          <h2>Login</h2>
+          <h2>Welcome back</h2>
           <p className="login-tagline">Access your personalized city planner.</p>
 
-          <label className="login-field">
-            Email
-            <input
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
+          <div className="auth-tabs" role="tablist" aria-label="Authentication">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeAuthTab === "login"}
+              className={`auth-tab${activeAuthTab === "login" ? " active" : ""}`}
+              onClick={() => {
+                setActiveAuthTab("login");
+                setError("");
+                setSignupError("");
+                setSignupMessage("");
+              }}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeAuthTab === "signup"}
+              className={`auth-tab${activeAuthTab === "signup" ? " active" : ""}`}
+              onClick={() => {
+                setActiveAuthTab("signup");
+                setError("");
+                setSignupError("");
+                setSignupMessage("");
+              }}
+            >
+              Signup
+            </button>
+          </div>
 
-          <label className="login-field">
-            Password
-            <div className="password-field">
-              <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <button
-                className="password-toggle"
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path
-                    d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
-                    fill="currentColor"
+          {activeAuthTab === "login" ? (
+            <>
+              <label className="login-field">
+                Email
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              </label>
+
+              <label className="login-field">
+                Password
+                <div className="password-field">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    minLength={8}
+                    required
                   />
-                </svg>
+                  <button
+                    className="password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </label>
+
+              <button
+                onClick={login}
+                className="image-btn"
+                type="button"
+                aria-label="Login"
+                disabled={!canLogin}
+              >
+                <img
+                  className="stateful-btn-image"
+                  src="/buttons/Login/btn_Login_original.png"
+                  alt="Login"
+                  data-default="/buttons/Login/btn_Login_original.png"
+                  data-hover="/buttons/Login/btn_Login_hover.png"
+                  data-active="/buttons/Login/btn_Login_click.png"
+                  data-locked={canLogin ? "false" : "true"}
+                />
               </button>
-            </div>
-          </label>
 
-          <button onClick={login} className="btn">
-            Login
-          </button>
+              {error && <div className="form-error">{error}</div>}
+            </>
+          ) : (
+            <>
+              <label className="login-field">
+                Email
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              </label>
 
-          <button onClick={signup} className="btn ghost" type="button" disabled={signupLoading}>
-            {signupLoading ? "Sending..." : "Signup"}
-          </button>
+              <label className="login-field">
+                Password
+                <div className="password-field">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    className="password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </label>
 
-          {signupError && <div className="form-error">{signupError}</div>}
-          {signupMessage && <div className="form-success">{signupMessage}</div>}
-          {error && <div className="form-error">{error}</div>}
+              <label className="login-field">
+                Confirm Password
+                <div className="password-field">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Confirm password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    className="password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </label>
+
+              <button
+                onClick={signup}
+                className="image-btn"
+                type="button"
+                aria-label={signupLoading ? "Sending" : "Signup"}
+                disabled={!canSignup}
+              >
+                <img
+                  className="stateful-btn-image"
+                  src="/buttons/Signup/btn_Signup_original.png"
+                  alt="Signup"
+                  data-default="/buttons/Signup/btn_Signup_original.png"
+                  data-hover="/buttons/Signup/btn_Signup_hover.png"
+                  data-active="/buttons/Signup/btn_Signup_click.png"
+                  data-locked={canSignup ? "false" : "true"}
+                />
+              </button>
+
+              {signupError && <div className="form-error">{signupError}</div>}
+              {signupMessage && <div className="form-success">{signupMessage}</div>}
+            </>
+          )}
         </div>
       </div>
     );
@@ -1459,11 +1638,27 @@ export default function App() {
     <div className="app-shell">
       <header className="site-header" data-include="/components/header.html">
         <div className="header-title">
-          <div className="brand">Places To Visit</div>
+          <img
+            className="brand"
+            src="/Banner/Places To Visit Banner.png"
+            alt="Places To Visit"
+          />
           <div className="header-subtitle">Smart city travel planner for curious minds.</div>
         </div>
-        <button className="btn logout-btn" type="button" onClick={logout}>
-          Logout
+        <button
+          className="image-btn logout-btn"
+          type="button"
+          onClick={logout}
+          aria-label="Logout"
+        >
+          <img
+            className="stateful-btn-image"
+            src="/buttons/Logout/btn_Logout_original.png"
+            alt="Logout"
+            data-default="/buttons/Logout/btn_Logout_original.png"
+            data-hover="/buttons/Logout/btn_Logout_hover.png"
+            data-active="/buttons/Logout/btn_Logout_click.png"
+          />
         </button>
       </header>
 
@@ -1504,8 +1699,20 @@ export default function App() {
                 maxLength={10}
                 placeholder="Type city (max 10)"
               />
-              <button id="city-search-btn" className="btn" type="button">
-                Find This City
+              <button
+                id="city-search-btn"
+                className="image-btn"
+                type="button"
+                aria-label="Find This City"
+              >
+                <img
+                  className="stateful-btn-image"
+                  src="/buttons/Find This City/btn_FindThisCity_original.png"
+                  alt="Find This City"
+                  data-default="/buttons/Find This City/btn_FindThisCity_original.png"
+                  data-hover="/buttons/Find This City/btn_FindThisCity_hover.png"
+                  data-active="/buttons/Find This City/btn_FindThisCity_click.png"
+                />
               </button>
               {missingCity && (
                 <div className="city-search-missing">
@@ -1587,8 +1794,21 @@ export default function App() {
                     <option value="">Select a city</option>
                   </select>
 
-                  <button id="route-submit" className="btn" type="button" disabled>
-                    Build My Plan
+                  <button
+                    id="route-submit"
+                    className="image-btn"
+                    type="button"
+                    disabled
+                    aria-label="Build My Plan"
+                  >
+                    <img
+                      className="stateful-btn-image"
+                      src="/buttons/Build My Plan/btn_BuildMyPlan_original.png"
+                      alt="Build My Plan"
+                      data-default="/buttons/Build My Plan/btn_BuildMyPlan_original.png"
+                      data-hover="/buttons/Build My Plan/btn_BuildMyPlan_hover.png"
+                      data-active="/buttons/Build My Plan/btn_BuildMyPlan_click.png"
+                    />
                   </button>
 
                   <div id="route-error" className="route-error-message"></div>
@@ -1608,8 +1828,15 @@ export default function App() {
                 <div className="route-result-wrapper" style={{ display: "none" }}>
                   <h3 className="route-result-title">Your City Guide</h3>
                   <div id="route-result" className="route-result"></div>
-                  <button id="save-pdf-btn" className="btn" type="button">
-                    Save PDF
+                                    <button id="save-pdf-btn" className="image-btn" type="button" aria-label="Save PDF">
+                    <img
+                      className="stateful-btn-image"
+                      src="/buttons/Create PDF/btn_create_PDF_original.png"
+                      alt="Save PDF"
+                      data-default="/buttons/Create PDF/btn_create_PDF_original.png"
+                      data-hover="/buttons/Create PDF/btn_create_PDF_hover.png"
+                      data-active="/buttons/Create PDF/btn_create_PDF_click.png"
+                    />
                   </button>
                 </div>
               </div>
@@ -1728,3 +1955,4 @@ export default function App() {
     </div>
   );
 }
+
