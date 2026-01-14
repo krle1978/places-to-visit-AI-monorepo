@@ -86,6 +86,7 @@ export default function App() {
   const [signupLoading, setSignupLoading] = useState(false);
   const [missingCity, setMissingCity] = useState("");
   const [missingCityMessage, setMissingCityMessage] = useState("");
+  const [, setMissingCitySuggestion] = useState(null);
   const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
   const [cityGenerateError, setCityGenerateError] = useState("");
   const [aiCity, setAiCity] = useState("");
@@ -229,6 +230,11 @@ export default function App() {
     let geoContext = null;
     let isNearestLoading = false;
     let isSearchLoading = false;
+    const planKey = String(plan || "")
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/-+/g, "_");
+    const allowAutoNearest = !["basic", "premium", "premium_plus"].includes(planKey);
 
     let countriesReadyDone = false;
     let resolveCountriesReady;
@@ -759,10 +765,27 @@ export default function App() {
       return match || "";
     }
 
+    function resolveCityAlias(cityName, countryName) {
+      if (!cityName) return "";
+      const normalizedCountry = normalizeName(countryName);
+      const normalizedCity = normalizeKey(cityName);
+      const aliasesByCountry = {
+        serbia: {
+          belgrade: "Beograd",
+          cityofbelgrade: "Beograd",
+          citiofbelgrade: "Beograd",
+          nis: "Niš"
+        }
+      };
+      const countryAliases = aliasesByCountry[normalizedCountry];
+      return countryAliases?.[normalizedCity] || cityName;
+    }
+
     function findCityOption(cityName) {
       if (!cityName) return null;
-      const normalized = normalizeName(cityName);
-      const targetKey = normalizeKey(cityName);
+      const resolvedCity = resolveCityAlias(cityName, countrySelect?.value || "");
+      const normalized = normalizeName(resolvedCity);
+      const targetKey = normalizeKey(resolvedCity);
       const exact = Array.from(citySelect.options).find(
         (opt) => normalizeName(opt.value) === normalized
       );
@@ -850,6 +873,33 @@ export default function App() {
       return { match: null, suggestion };
     }
 
+    async function findNearestFromCityName(cityQuery) {
+      const geo = await fetchJsonWithFallback(
+        `/api/geo/locate?city=${encodeURIComponent(cityQuery)}`
+      );
+      const countryName = findCountryName(geo?.country);
+      if (!countryName) {
+        throw new Error("No matching country found.");
+      }
+
+      const fileName = countryFileMap[countryName];
+      if (!fileName) {
+        throw new Error("No data file for selected country.");
+      }
+
+      const nearest = await fetchJsonWithFallback(
+        `/api/geo/nearest?lat=${encodeURIComponent(
+          geo.lat
+        )}&lon=${encodeURIComponent(geo.lon)}&file=${encodeURIComponent(fileName)}`
+      );
+      const cityName = nearest?.city;
+      if (!cityName) {
+        throw new Error("No nearby city found.");
+      }
+
+      return { country: countryName, city: cityName };
+    }
+
     async function applyPendingCitySelection() {
       if (!pendingSelection) return;
       if (pendingSelection.country && countrySelect.value !== pendingSelection.country) return;
@@ -872,6 +922,7 @@ export default function App() {
 
       if (
         pendingSelection.allowPrompt &&
+        allowAutoNearest &&
         !isNearestLoading &&
         geoContext?.lat &&
         geoContext?.lon
@@ -937,7 +988,7 @@ export default function App() {
             );
 
             const countryName = findCountryName(data?.country);
-            const cityName = data?.city || "";
+            const cityName = resolveCityAlias(data?.city || "", countryName);
 
             if (!countryName) {
               errorMsg.textContent = "No matching country found.";
@@ -995,15 +1046,19 @@ export default function App() {
     }
 
     if (citySearchInput && citySearchBtn) {
-      const canGenerateCity = plan === "basic" || plan === "premium";
+      const canGenerateCity = ["basic", "premium", "premium_plus"].includes(planKey);
 
       const onCitySearch = async () => {
         if (isSearchLoading) return;
-
         const raw = citySearchInput.value.trim();
         if (!raw) {
+          if (canGenerateCity) {
+            resolveGeoLocation();
+            return;
+          }
           setMissingCity("");
           setMissingCityMessage("");
+          setMissingCitySuggestion(null);
           setCityGenerateError("");
           errorMsg.textContent = "Please enter a city name.";
           return;
@@ -1012,6 +1067,7 @@ export default function App() {
         if (raw.length > 10) {
           setMissingCity("");
           setMissingCityMessage("");
+          setMissingCitySuggestion(null);
           setCityGenerateError("");
           errorMsg.textContent = "City name must be 10 characters or less.";
           return;
@@ -1043,6 +1099,7 @@ export default function App() {
               city: result.match.city,
               autoSubmit: true
             };
+            setMissingCitySuggestion(null);
 
             if (countrySelect.value !== result.match.country) {
               countrySelect.value = result.match.country;
@@ -1054,15 +1111,42 @@ export default function App() {
           }
 
           setMissingCity(raw);
+          setMissingCitySuggestion(result.suggestion || null);
           if (result.suggestion) {
             errorMsg.textContent = `City not found. Did you mean ${result.suggestion.city}, ${result.suggestion.country}?`;
           } else {
             errorMsg.textContent = "";
           }
 
+          if (isFree) {
+            setMissingCityMessage(
+              "We don't have that city in our offer. Change your user plan. Showing the nearest city from our offer."
+            );
+            try {
+              const nearest = await findNearestFromCityName(raw);
+              pendingSelection = {
+                country: nearest.country,
+                city: nearest.city,
+                autoSubmit: true
+              };
+
+              openPlannerPanel();
+
+              if (countrySelect.value !== nearest.country) {
+                countrySelect.value = nearest.country;
+                countrySelect.dispatchEvent(new Event("change"));
+              } else {
+                applyPendingCitySelection();
+              }
+            } catch (err) {
+              console.error(err);
+              errorMsg.textContent = err?.message || "Failed to find nearest city.";
+            }
+            return;
+          }
+
           if (canGenerateCity) {
-            setMissingCityMessage(`Generating data for ${raw}...`);
-            generateCityRoute(raw);
+            setMissingCityMessage("City not found. Choose an option below.");
           } else {
             setMissingCityMessage(
               "This city is not available in our offer. If you want to create it, you need to subscribe to one of the available subscription models."
@@ -1111,6 +1195,10 @@ export default function App() {
             `/api/countries/${encodeURIComponent(fileName)}/cities`,
             {
               method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`
+              },
               body: JSON.stringify({
                 city: geoContext.city,
                 country: geoContext.country
@@ -1202,6 +1290,20 @@ export default function App() {
       cleanup.push(() => geoNearestBtn.removeEventListener("click", onNearest));
     }
 
+    async function refreshCountryData(countryName) {
+      const fileName = countryFileMap[countryName];
+      if (!fileName) {
+        throw new Error("No data file for selected country.");
+      }
+      const json = await fetchJsonWithFallback(
+        `/api/countries/${encodeURIComponent(fileName)}`
+      );
+      countryDataCache[fileName] = json;
+      selectedCountry = json;
+      populateCities(json.cities || []);
+      applyPendingCitySelection();
+    }
+
     function openPlannerPanel() {
       if (!panel) return;
       panel.classList.add("open");
@@ -1213,7 +1315,12 @@ export default function App() {
     }
 
     window.routePlannerEasy = window.routePlannerEasy || {};
-    window.routePlannerEasy.selectLocation = function (countryName, cityName, autoSubmit = false) {
+    window.routePlannerEasy.selectLocation = async function (
+      countryName,
+      cityName,
+      autoSubmit = false,
+      forceReload = false
+    ) {
       if (!countryName) return;
       pendingSelection = { country: countryName, city: cityName, autoSubmit: Boolean(autoSubmit) };
 
@@ -1222,11 +1329,60 @@ export default function App() {
       if (countrySelect.value !== countryName) {
         countrySelect.value = countryName;
         countrySelect.dispatchEvent(new Event("change"));
+      } else if (forceReload) {
+        try {
+          await refreshCountryData(countryName);
+        } catch (err) {
+          console.error(err);
+          errorMsg.textContent = err?.message || "Failed to load data.";
+        }
       } else {
         applyPendingCitySelection();
       }
     };
     window.routePlannerEasy.openPanel = openPlannerPanel;
+    window.routePlannerEasy.findNearestFromUser = async function () {
+      if (!navigator.geolocation) {
+        throw new Error("Geolocation is not supported.");
+      }
+
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 10000
+        });
+      });
+
+      const { latitude, longitude } = position.coords || {};
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error("Invalid coordinates.");
+      }
+
+      const geo = await fetchJsonWithFallback(
+        `/api/geo/reverse?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
+      );
+      const countryName = findCountryName(geo?.country);
+      if (!countryName) {
+        throw new Error("No matching country found.");
+      }
+
+      const fileName = countryFileMap[countryName];
+      if (!fileName) {
+        throw new Error("No data file for selected country.");
+      }
+
+      const nearest = await fetchJsonWithFallback(
+        `/api/geo/nearest?lat=${encodeURIComponent(
+          latitude
+        )}&lon=${encodeURIComponent(longitude)}&file=${encodeURIComponent(fileName)}`
+      );
+      const cityName = nearest?.city;
+      if (!cityName) {
+        throw new Error("No nearby city found.");
+      }
+
+      return { country: countryName, city: cityName };
+    };
 
     document.dispatchEvent(new Event("routePlanner:ready"));
 
@@ -1335,10 +1491,17 @@ export default function App() {
   const confirmMatches = password === confirmPassword;
   const canLogin = emailIsValid && passwordIsValid;
   const canSignup = emailIsValid && passwordIsValid && confirmMatches && !signupLoading;
+  const planKey = String(plan || "")
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-+/g, "_");
+  const isFree = planKey === "free";
+  const isPremium = planKey === "premium" || planKey === "premium_plus";
+  const canGenerateCity = planKey === "basic" || isPremium;
 
   async function generateCityRoute(cityName = missingCity) {
     if (!cityName || cityGenerateLoading) return;
-    if (!(plan === "basic" || plan === "premium")) {
+    if (!canGenerateCity) {
       setCityGenerateError("Your plan does not allow adding new cities.");
       return;
     }
@@ -1360,9 +1523,10 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || "Failed to generate city data.");
 
       if (window.routePlannerEasy?.selectLocation) {
-        window.routePlannerEasy.selectLocation(data.country, data.city, true);
+        window.routePlannerEasy.selectLocation(data.country, data.city, true, true);
         setMissingCity("");
         setMissingCityMessage("");
+        setMissingCitySuggestion(null);
       } else {
         setCityGenerateError("Route planner is not ready yet.");
       }
@@ -1430,11 +1594,41 @@ export default function App() {
     }
   }
 
-  const isPremium = plan === "premium" || plan === "premium_plus";
-  const canGenerateCity = plan === "basic" || isPremium;
-
   const openSubscriptions = () => {
     window.location.href = "/subscription.html";
+  };
+
+  const handleMissingCityMake = async () => {
+    if (!missingCity || cityGenerateLoading) return;
+    setCityGenerateError("");
+    setMissingCityMessage(`Generating data for ${missingCity}...`);
+    await generateCityRoute(missingCity);
+  };
+
+  const handleMissingCityNearest = async () => {
+    if (cityGenerateLoading) return;
+    setCityGenerateError("");
+    setMissingCityMessage("Finding nearest city...");
+    setCityGenerateLoading(true);
+
+    try {
+      if (!window.routePlannerEasy?.findNearestFromUser) {
+        throw new Error("Route planner is not ready yet.");
+      }
+
+      const nearest = await window.routePlannerEasy.findNearestFromUser();
+      if (!nearest?.country || !nearest?.city) {
+        throw new Error("No nearby city found.");
+      }
+
+      window.routePlannerEasy.selectLocation(nearest.country, nearest.city, true);
+      setMissingCity("");
+      setMissingCityMessage("");
+    } catch (err) {
+      setCityGenerateError(err.message || "Failed to find nearest city.");
+    } finally {
+      setCityGenerateLoading(false);
+    }
   };
 
   if (!token) {
@@ -1724,21 +1918,31 @@ export default function App() {
                   </div>
                   {!canGenerateCity && (
                     <button className="btn ghost" type="button" onClick={openSubscriptions}>
-                      Subscription models
+                      Change Your Plan
                     </button>
                   )}
                   {canGenerateCity && cityGenerateError && (
                     <div className="form-error">{cityGenerateError}</div>
                   )}
-                  {canGenerateCity && cityGenerateError && (
-                    <button
-                      onClick={() => generateCityRoute(missingCity)}
-                      disabled={cityGenerateLoading}
-                      className="btn"
-                      type="button"
-                    >
-                      {cityGenerateLoading ? "Thinking..." : "Try again"}
-                    </button>
+                  {canGenerateCity && (
+                    <div className="city-search-actions">
+                      <button
+                        onClick={handleMissingCityMake}
+                        disabled={cityGenerateLoading}
+                        className="btn"
+                        type="button"
+                      >
+                        {cityGenerateLoading ? "Working..." : "Generate city"}
+                      </button>
+                      <button
+                        onClick={handleMissingCityNearest}
+                        disabled={cityGenerateLoading}
+                        className="btn ghost"
+                        type="button"
+                      >
+                        {cityGenerateLoading ? "Working..." : "Show nearest city"}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
@@ -1955,4 +2159,5 @@ export default function App() {
     </div>
   );
 }
+
 
