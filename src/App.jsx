@@ -72,6 +72,7 @@ function getPlanFromToken(token) {
 
 export default function App() {
   const [email, setEmail] = useState("");
+  const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
@@ -91,12 +92,8 @@ export default function App() {
   const [, setMissingCitySuggestion] = useState(null);
   const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
   const [cityGenerateError, setCityGenerateError] = useState("");
-  const [aiCity, setAiCity] = useState("");
   const [aiInterests, setAiInterests] = useState("");
-  const [aiResult, setAiResult] = useState(null);
-  const [aiError, setAiError] = useState("");
-  const [aiNotice, setAiNotice] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
+  const [showInterests, setShowInterests] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -313,6 +310,7 @@ export default function App() {
       .replace(/\s+/g, "_")
       .replace(/-+/g, "_");
     const allowAutoNearest = !["basic", "premium", "premium_plus"].includes(planKey);
+    const isPremiumPlan = planKey === "premium" || planKey === "premium_plus";
 
     let countriesReadyDone = false;
     let resolveCountriesReady;
@@ -1129,6 +1127,8 @@ export default function App() {
       const onCitySearch = async () => {
         if (isSearchLoading) return;
         const raw = citySearchInput.value.trim();
+        const interestsInput = document.getElementById("city-interests-input");
+        const interests = (interestsInput?.value || "").trim();
         if (!raw) {
           if (canGenerateCity) {
             resolveGeoLocation();
@@ -1161,6 +1161,25 @@ export default function App() {
         citySearchBtn.disabled = true;
 
         try {
+          if (isPremiumPlan && interests) {
+            const question = `City: ${raw}\nInterests: ${interests}\nReturn the standard city guide JSON schema with content tailored to these interests.`;
+            const aiData = await fetchJsonWithFallback("/api/ask", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({ question })
+            });
+
+            selectedCityObj = {
+              ...aiData,
+              name: aiData?.name || raw
+            };
+            onSubmit();
+            return;
+          }
+
           await countriesReady;
           if (!Object.keys(countryFileMap).length) {
             errorMsg.textContent = "Country list is not ready yet.";
@@ -1532,12 +1551,8 @@ export default function App() {
     setError("");
     setSignupMessage("");
     setSignupError("");
-    if (!email || !password) {
-      setError("Email and password required.");
-      return;
-    }
-    if (!isValidEmail(email)) {
-      setError("Please enter a valid email address.");
+    if (!loginName || !password) {
+      setError("Username and password required.");
       return;
     }
     if (password.length < 8) {
@@ -1548,7 +1563,7 @@ export default function App() {
       const res = await fetch(`${API}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ username: loginName.trim(), password })
       });
 
       const data = await res.json();
@@ -1573,10 +1588,11 @@ export default function App() {
 
   const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   const nameIsValid = Boolean(name.trim());
+  const loginNameIsValid = Boolean(loginName.trim());
   const emailIsValid = isValidEmail(email);
   const passwordIsValid = password.length >= 8;
   const confirmMatches = password === confirmPassword;
-  const canLogin = emailIsValid && passwordIsValid;
+  const canLogin = loginNameIsValid && passwordIsValid;
   const canSignup =
     nameIsValid &&
     emailIsValid &&
@@ -1631,63 +1647,6 @@ export default function App() {
     }
   }
 
-  async function askPremiumGuide() {
-    if (aiLoading) return;
-    const city = aiCity.trim();
-    const interests = aiInterests.trim();
-
-    setAiError("");
-    setAiNotice("");
-    setAiResult(null);
-
-    if (!city || !interests) {
-      setAiError("City and interests are required.");
-      return;
-    }
-
-    setAiLoading(true);
-    try {
-      const generatePromise = fetch(`${API}/api/cities/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ city })
-      });
-
-      const personalizedPromise = fetch(`${API}/api/ask/personalized`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ city, interests })
-      });
-
-      const [generateRes, personalizedRes] = await Promise.all([
-        generatePromise,
-        personalizedPromise
-      ]);
-
-      if (!generateRes.ok) {
-        const generateData = await generateRes.json().catch(() => ({}));
-        setAiNotice(generateData.error || "Failed to save city data.");
-      }
-
-      const personalizedData = await personalizedRes.json().catch(() => ({}));
-      if (!personalizedRes.ok) {
-        throw new Error(personalizedData.error || "Failed to generate personalized guide.");
-      }
-
-      setAiResult(personalizedData);
-    } catch (err) {
-      setAiError(err.message || "Failed to generate personalized guide.");
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
   const openSubscriptions = () => {
     window.location.href = "/subscription.html";
   };
@@ -1733,9 +1692,10 @@ export default function App() {
           src="/Banner/Places To Visit Banner.png"
           alt="Places To Visit"
         />
-        <div className="login-card">
-          <h2>Welcome back</h2>
-          <p className="login-tagline">Access your personalized city planner.</p>
+        <div className="login-card-wrap">
+          <div className="login-card">
+            <h2>Welcome back</h2>
+            <p className="login-tagline">Access your personalized city planner.</p>
 
           <div className="auth-tabs" role="tablist" aria-label="Authentication">
             <button
@@ -1768,181 +1728,182 @@ export default function App() {
             </button>
           </div>
 
-          {activeAuthTab === "login" ? (
-            <>
-              <label className="login-field">
-                Email
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  required
-                />
-              </label>
-
-              <label className="login-field">
-                Password
-                <div className="password-field">
+            {activeAuthTab === "login" ? (
+              <>
+                <label className="login-field">
+                  Username
                   <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    minLength={8}
+                    type="text"
+                    placeholder="Username"
+                    value={loginName}
+                    onChange={(e) => setLoginName(e.target.value)}
+                    autoComplete="username"
                     required
                   />
-                  <button
-                    className="password-toggle"
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path
-                        d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </label>
+                </label>
 
-              <button
-                onClick={login}
-                className="image-btn"
-                type="button"
-                aria-label="Login"
-                disabled={!canLogin}
-              >
-                <img
-                  className="stateful-btn-image"
-                  src="/buttons/Login/btn_Login_original.png"
-                  alt="Login"
-                  data-default="/buttons/Login/btn_Login_original.png"
-                  data-hover="/buttons/Login/btn_Login_hover.png"
-                  data-active="/buttons/Login/btn_Login_click.png"
-                  data-locked={canLogin ? "false" : "true"}
-                />
-              </button>
+                <label className="login-field">
+                  Password
+                  <div className="password-field">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="current-password"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      className="password-toggle"
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </label>
 
-              {error && <div className="form-error">{error}</div>}
-            </>
-          ) : (
-            <>
-              <label className="login-field">
-                Name
-                <input
-                  type="text"
-                  placeholder="Name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  autoComplete="name"
-                  required
-                />
-              </label>
-              {name.trim() && nameStatus !== "idle" && (
-                <div
-                  className={`name-status ${
-                    nameStatus === "available" ? "available" : "taken"
-                  }`}
+                <button
+                  onClick={login}
+                  className="image-btn"
+                  type="button"
+                  aria-label="Login"
+                  disabled={!canLogin}
                 >
-                  {nameStatus === "available" ? "New User" : "Existing User"}
-                </div>
-              )}
+                  <img
+                    className="stateful-btn-image"
+                    src="/buttons/Login/btn_Login_original.png"
+                    alt="Login"
+                    data-default="/buttons/Login/btn_Login_original.png"
+                    data-hover="/buttons/Login/btn_Login_hover.png"
+                    data-active="/buttons/Login/btn_Login_click.png"
+                    data-locked={canLogin ? "false" : "true"}
+                  />
+                </button>
 
-              <label className="login-field">
-                Email
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  required
-                />
-              </label>
-
-              <label className="login-field">
-                Password
-                <div className="password-field">
+                {error && <div className="form-error">{error}</div>}
+              </>
+            ) : (
+              <>
+                <label className="login-field">
+                  Name
                   <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="new-password"
-                    minLength={8}
+                    type="text"
+                    placeholder="Name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    autoComplete="name"
                     required
                   />
-                  <button
-                    className="password-toggle"
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                </label>
+                {name.trim() && nameStatus !== "idle" && (
+                  <div
+                    className={`name-status ${
+                      nameStatus === "available" ? "available" : "taken"
+                    }`}
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path
-                        d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </label>
+                    {nameStatus === "available" ? "New User" : "Existing User"}
+                  </div>
+                )}
 
-              <label className="login-field">
-                Confirm Password
-                <div className="password-field">
+                <label className="login-field">
+                  Email
                   <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Confirm password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    autoComplete="new-password"
-                    minLength={8}
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="email"
                     required
                   />
-                  <button
-                    className="password-toggle"
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path
-                        d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </label>
+                </label>
 
-              <button
-                onClick={signup}
-                className="image-btn"
-                type="button"
-                aria-label={signupLoading ? "Sending" : "Signup"}
-                disabled={!canSignup}
-              >
-                <img
-                  className="stateful-btn-image"
-                  src="/buttons/Signup/btn_Signup_original.png"
-                  alt="Signup"
-                  data-default="/buttons/Signup/btn_Signup_original.png"
-                  data-hover="/buttons/Signup/btn_Signup_hover.png"
-                  data-active="/buttons/Signup/btn_Signup_click.png"
-                  data-locked={canSignup ? "false" : "true"}
-                />
-              </button>
+                <label className="login-field">
+                  Password
+                  <div className="password-field">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      className="password-toggle"
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </label>
 
-              {signupError && <div className="form-error">{signupError}</div>}
-              {signupMessage && <div className="form-success">{signupMessage}</div>}
-            </>
-          )}
+                <label className="login-field">
+                  Confirm Password
+                  <div className="password-field">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Confirm password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      className="password-toggle"
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 5c5.5 0 9.5 4.2 10.8 6-1.3 1.8-5.3 6-10.8 6S2.5 12.8 1.2 11C2.5 9.2 6.5 5 12 5zm0 3.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </label>
+
+                <button
+                  onClick={signup}
+                  className="image-btn"
+                  type="button"
+                  aria-label={signupLoading ? "Sending" : "Signup"}
+                  disabled={!canSignup}
+                >
+                  <img
+                    className="stateful-btn-image"
+                    src="/buttons/Signup/btn_Signup_original.png"
+                    alt="Signup"
+                    data-default="/buttons/Signup/btn_Signup_original.png"
+                    data-hover="/buttons/Signup/btn_Signup_hover.png"
+                    data-active="/buttons/Signup/btn_Signup_click.png"
+                    data-locked={canSignup ? "false" : "true"}
+                  />
+                </button>
+
+                {signupError && <div className="form-error">{signupError}</div>}
+                {signupMessage && <div className="form-success">{signupMessage}</div>}
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -2017,6 +1978,31 @@ export default function App() {
                 maxLength={10}
                 placeholder="Type city (max 10)"
               />
+              {isPremium && (
+                <div className={`city-interests ${showInterests ? "open" : ""}`}>
+                  <button
+                    type="button"
+                    className="city-interests-toggle"
+                    aria-expanded={showInterests ? "true" : "false"}
+                    aria-controls="city-interests-input"
+                    onClick={() => setShowInterests((prev) => !prev)}
+                  >
+                    <span>Interests</span>
+                    <span className="city-interests-arrow" aria-hidden="true">
+                      {showInterests ? "▲" : "▼"}
+                    </span>
+                  </button>
+                  {showInterests && (
+                    <input
+                      id="city-interests-input"
+                      type="text"
+                      placeholder="street food, modern art, live music"
+                      value={aiInterests}
+                      onChange={(e) => setAiInterests(e.target.value)}
+                    />
+                  )}
+                </div>
+              )}
               <button
                 id="city-search-btn"
                 className="image-btn"
@@ -2172,105 +2158,6 @@ export default function App() {
           </div>
         </section>
 
-        {isPremium && (
-          <section className="ai-section">
-            <div className="ai-panel">
-              <div className="ai-panel-header">
-                <h2>Ask the AI Guide</h2>
-                <p>Get a personalized schedule based on your interests.</p>
-              </div>
-              <div className="ai-panel-body">
-                <label className="ai-field">
-                  City
-                  <input
-                    type="text"
-                    value={aiCity}
-                    onChange={(e) => setAiCity(e.target.value)}
-                    placeholder="Lisbon"
-                  />
-                </label>
-                <label className="ai-field">
-                  Interests
-                  <input
-                    type="text"
-                    value={aiInterests}
-                    onChange={(e) => setAiInterests(e.target.value)}
-                    placeholder="street food, modern art, live music"
-                  />
-                </label>
-                <button onClick={askPremiumGuide} disabled={aiLoading} className="btn">
-                  {aiLoading ? "Thinking..." : "Ask"}
-                </button>
-                {aiError && <div className="form-error">{aiError}</div>}
-                {aiNotice && <div className="form-success">{aiNotice}</div>}
-                {aiResult && (
-                  <div className="ai-result">
-                    <div className="ai-result-title">
-                      Personalized schedule for {aiResult.city || aiCity}
-                    </div>
-                    {Array.isArray(aiResult.itinerary) ? (
-                      <div className="ai-itinerary">
-                        {aiResult.itinerary.map((item, index) => {
-                          const link = item?.map_link || "";
-                          const title = item?.title || "Stop";
-                          return (
-                            <div className="ai-itinerary-item" key={`${title}-${index}`}>
-                              <div className="ai-itinerary-time">{item?.time || "--:--"}</div>
-                              <div className="ai-itinerary-body">
-                                <div className="ai-itinerary-title">
-                                  {link ? (
-                                    <a href={link} target="_blank" rel="noopener noreferrer">
-                                      {title}
-                                    </a>
-                                  ) : (
-                                    title
-                                  )}
-                                </div>
-                                {item?.type && (
-                                  <div className="ai-itinerary-type">{item.type}</div>
-                                )}
-                                {item?.description && <p>{item.description}</p>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <textarea
-                        rows={10}
-                        readOnly
-                        value={JSON.stringify(aiResult, null, 2)}
-                        className="ai-answer"
-                      />
-                    )}
-                    {Array.isArray(aiResult.tips) && aiResult.tips.length > 0 && (
-                      <div className="ai-tips">
-                        <h4>Tips</h4>
-                        <ul>
-                          {aiResult.tips.map((tip, index) => {
-                            const label = tip?.tip || "Tip";
-                            const link = tip?.map_link;
-                            return (
-                              <li key={`${label}-${index}`}>
-                                {link ? (
-                                  <a href={link} target="_blank" rel="noopener noreferrer">
-                                    {label}
-                                  </a>
-                                ) : (
-                                  label
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
       </main>
 
       <footer className="site-footer" data-include="/components/footer.html">
@@ -2283,5 +2170,3 @@ export default function App() {
     </div>
   );
 }
-
-
