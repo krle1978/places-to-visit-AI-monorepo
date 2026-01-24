@@ -1552,7 +1552,7 @@ export default function App() {
     setSignupMessage("");
     setSignupError("");
     if (!loginName || !password) {
-      setError("Username and password required.");
+      setError("Username or email and password required.");
       return;
     }
     if (password.length < 8) {
@@ -1563,7 +1563,11 @@ export default function App() {
       const res = await fetch(`${API}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: loginName.trim(), password })
+        body: JSON.stringify({
+          username: loginName.trim(),
+          email: loginName.trim(),
+          password
+        })
       });
 
       const data = await res.json();
@@ -1731,10 +1735,10 @@ export default function App() {
             {activeAuthTab === "login" ? (
               <>
                 <label className="login-field">
-                  Username
+                  Username or email
                   <input
                     type="text"
-                    placeholder="Username"
+                    placeholder="Username or email"
                     value={loginName}
                     onChange={(e) => setLoginName(e.target.value)}
                     autoComplete="username"
