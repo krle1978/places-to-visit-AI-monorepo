@@ -259,6 +259,7 @@ export default function App() {
     const gpsBtn = document.getElementById("gpsBtn");
     const citySearchInput = document.getElementById("city-search-input");
     const citySearchBtn = document.getElementById("city-search-btn");
+    const citySearchSuggestions = document.getElementById("city-search-suggestions");
 
     const panel = document.getElementById("route-planner-panel");
     const openBtn = document.getElementById("toggle-planner-btn");
@@ -278,6 +279,7 @@ export default function App() {
     const submitBtn = document.getElementById("route-submit");
     const errorMsg = document.getElementById("route-error");
     const resultWrapper = document.querySelector(".route-result-wrapper");
+    const routeFormWrapper = document.querySelector(".route-form-wrapper");
     const resultDiv = document.getElementById("route-result");
     const savePdfBtn = document.getElementById("save-pdf-btn");
     const geoPrompt = document.getElementById("geo-unknown");
@@ -657,7 +659,8 @@ export default function App() {
       resultDiv.innerHTML = html;
       resultWrapper.style.display = "block";
       setTimeout(() => {
-        resultWrapper.scrollIntoView({ behavior: "smooth", block: "start" });
+        const scrollTarget = routeFormWrapper || resultWrapper;
+        scrollTarget?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 50);
 
       savePdfBtn.onclick = function () {
@@ -1124,12 +1127,131 @@ export default function App() {
 
     if (citySearchInput && citySearchBtn) {
       const canGenerateCity = ["basic", "premium", "premium_plus"].includes(planKey);
+      let suggestTimer = null;
+      let suggestRequestId = 0;
+
+      const clearCitySuggestions = () => {
+        if (!citySearchSuggestions) return;
+        citySearchSuggestions.innerHTML = "";
+        citySearchSuggestions.style.display = "none";
+        citySearchSuggestions.setAttribute("aria-expanded", "false");
+      };
+
+      const renderCitySuggestions = (items) => {
+        if (!citySearchSuggestions) return;
+        if (!items.length) {
+          clearCitySuggestions();
+          return;
+        }
+
+        const list = document.createElement("ul");
+        list.className = "city-search-suggestions-list";
+
+        items.forEach((item) => {
+          const li = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = "#";
+          link.className = "city-search-suggestion";
+          link.textContent = `${item.city} (${item.country})`;
+          link.dataset.city = item.city;
+          link.dataset.country = item.country;
+          li.appendChild(link);
+          list.appendChild(li);
+        });
+
+        citySearchSuggestions.innerHTML = "";
+        citySearchSuggestions.appendChild(list);
+        citySearchSuggestions.style.display = "block";
+        citySearchSuggestions.setAttribute("aria-expanded", "true");
+      };
+
+      const buildCitySuggestions = async (query) => {
+        const normalizedQuery = normalizeName(query);
+        if (!normalizedQuery) return [];
+
+        const matches = [];
+        const entries = Object.entries(countryFileMap);
+
+        for (const [countryName, fileName] of entries) {
+          if (!fileName) continue;
+          let json = countryDataCache[fileName];
+          if (!json) {
+            try {
+              json = await fetchJsonWithFallback(
+                `/api/countries/${encodeURIComponent(fileName)}`
+              );
+              countryDataCache[fileName] = json;
+            } catch (err) {
+              console.error(err);
+              continue;
+            }
+          }
+
+          const cities = Array.isArray(json?.cities) ? json.cities : [];
+          for (const city of cities) {
+            const cityName = city?.name || "";
+            const normalizedCity = normalizeName(cityName);
+            if (!normalizedCity) continue;
+            if (normalizedCity.includes(normalizedQuery)) {
+              matches.push({ country: countryName, city: cityName });
+              if (matches.length >= 12) return matches;
+            }
+          }
+        }
+
+        return matches;
+      };
+
+      const handleSuggestionSelection = async (countryName, cityName) => {
+        if (!countryName || !cityName) return;
+
+        openPlannerPanel();
+        errorMsg.textContent = "";
+        resultWrapper.style.display = "none";
+        setMissingCity("");
+        setMissingCityMessage("");
+        setMissingCitySuggestion(null);
+        setCityGenerateError("");
+
+        await countriesReady;
+        const fileName = countryFileMap[countryName];
+        if (!fileName) {
+          errorMsg.textContent = "No data file for selected country.";
+          return;
+        }
+
+        pendingSelection = {
+          country: countryName,
+          city: cityName,
+          autoSubmit: true
+        };
+
+        if (countrySelect.value !== countryName) {
+          countrySelect.value = countryName;
+          countrySelect.dispatchEvent(new Event("change"));
+        } else {
+          applyPendingCitySelection();
+        }
+      };
+
+      const onSuggestionClick = (event) => {
+        const target = event.target.closest("a[data-city][data-country]");
+        if (!target) return;
+        event.preventDefault();
+
+        const cityName = target.dataset.city;
+        const countryName = target.dataset.country;
+        citySearchInput.value = cityName;
+        clearCitySuggestions();
+        handleSuggestionSelection(countryName, cityName);
+      };
 
       const onCitySearch = async () => {
         if (isSearchLoading) return;
         const raw = citySearchInput.value.trim();
         const interestsInput = document.getElementById("city-interests-input");
         const interests = (interestsInput?.value || "").trim();
+        clearCitySuggestions();
         if (!raw) {
           if (canGenerateCity) {
             resolveGeoLocation();
@@ -1152,7 +1274,6 @@ export default function App() {
           return;
         }
 
-        openPlannerPanel();
         errorMsg.textContent = "";
         resultWrapper.style.display = "none";
         setMissingCity("");
@@ -1163,6 +1284,7 @@ export default function App() {
 
         try {
           if (isPremiumPlan && interests) {
+            openPlannerPanel();
             const question = `City: ${raw}\nInterests: ${interests}\nReturn the standard city guide JSON schema with content tailored to these interests.`;
             const aiData = await fetchJsonWithFallback("/api/ask", {
               method: "POST",
@@ -1199,6 +1321,7 @@ export default function App() {
             };
             setMissingCitySuggestion(null);
 
+            openPlannerPanel();
             if (countrySelect.value !== result.match.country) {
               countrySelect.value = result.match.country;
               countrySelect.dispatchEvent(new Event("change"));
@@ -1266,11 +1389,54 @@ export default function App() {
         }
       };
 
+      const onCitySearchInput = () => {
+        const raw = citySearchInput.value.trim();
+        if (!raw || raw.length > 10) {
+          clearCitySuggestions();
+          return;
+        }
+
+        if (suggestTimer) clearTimeout(suggestTimer);
+        const requestId = ++suggestRequestId;
+        suggestTimer = setTimeout(async () => {
+          await countriesReady;
+          if (requestId !== suggestRequestId) return;
+          if (!Object.keys(countryFileMap).length) {
+            clearCitySuggestions();
+            return;
+          }
+          const items = await buildCitySuggestions(raw);
+          if (requestId !== suggestRequestId) return;
+          renderCitySuggestions(items);
+        }, 150);
+      };
+
+      const onDocumentClick = (event) => {
+        if (!citySearchSuggestions) return;
+        if (
+          citySearchSuggestions.contains(event.target) ||
+          citySearchInput.contains(event.target)
+        ) {
+          return;
+        }
+        clearCitySuggestions();
+      };
+
       citySearchBtn.addEventListener("click", onCitySearch);
+      citySearchInput.addEventListener("input", onCitySearchInput);
       citySearchInput.addEventListener("keydown", onCitySearchKeydown);
+      if (citySearchSuggestions) {
+        citySearchSuggestions.addEventListener("click", onSuggestionClick);
+      }
+      document.addEventListener("click", onDocumentClick);
 
       cleanup.push(() => citySearchBtn.removeEventListener("click", onCitySearch));
+      cleanup.push(() => citySearchInput.removeEventListener("input", onCitySearchInput));
       cleanup.push(() => citySearchInput.removeEventListener("keydown", onCitySearchKeydown));
+      if (citySearchSuggestions) {
+        cleanup.push(() => citySearchSuggestions.removeEventListener("click", onSuggestionClick));
+      }
+      cleanup.push(() => document.removeEventListener("click", onDocumentClick));
     }
 
     if (geoMakeBtn) {
@@ -1665,7 +1831,7 @@ export default function App() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to generate city data.");
+      if (!res.ok) throw new Error(data.error || "Failed to Generate This City data.");
 
       if (window.routePlannerEasy?.selectLocation) {
         window.routePlannerEasy.selectLocation(data.country, data.city, true, true);
@@ -2073,6 +2239,13 @@ export default function App() {
                 maxLength={10}
                 placeholder="Type city (max 10)"
               />
+              <div
+                id="city-search-suggestions"
+                className="city-search-suggestions"
+                role="listbox"
+                aria-label="City suggestions"
+                aria-live="polite"
+              ></div>
               {isPremium && (
                 <div className={`city-interests ${showInterests ? "open" : ""}`}>
                   <button
@@ -2137,7 +2310,7 @@ export default function App() {
                         className="btn"
                         type="button"
                       >
-                        {cityGenerateLoading ? "Working..." : "Generate city"}
+                        {cityGenerateLoading ? "Working..." : "Generate This City"}
                       </button>
                       <button
                         onClick={handleMissingCityNearest}
@@ -2173,13 +2346,6 @@ export default function App() {
                 Show Me!
               </button>
             </div>
-
-            <button
-              className="btn ghost image-btn"
-              id="toggle-planner-btn"
-              type="button"
-              aria-label="Make Your Own City Visit"
-            ></button>
 
           </div>
         </section>
