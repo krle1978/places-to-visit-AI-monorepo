@@ -1,0 +1,141 @@
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Georgia", "Times New Roman", serif;
+  background: #f6efe5;
+  color: #2b241c;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2rem 6vw 1rem;
+}
+
+.home-btn {
+  text-decoration: none;
+  color: #2b241c;
+  background: #eadcc6;
+  border-radius: 999px;
+  padding: 0.5rem 1.2rem;
+  font-weight: 600;
+}
+
+.logo-icon {
+  height: 54px;
+  width: auto;
+}
+
+.page-main {
+  padding: 1rem 6vw 3rem;
+  display: flex;
+  justify-content: center;
+}
+
+.profile-card {
+  width: min(560px, 100%);
+  background: #fffaf3;
+  border-radius: 24px;
+  padding: 2rem;
+  box-shadow: 0 18px 40px rgba(34, 26, 18, 0.12);
+  border: 1px solid #eadcc6;
+}
+
+.profile-card h1 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+}
+
+.subtitle {
+  margin: 0 0 1.5rem;
+  color: #6b5a45;
+}
+
+.profile-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.profile-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: #f9f1e2;
+  border-radius: 14px;
+}
+
+.label {
+  font-weight: 600;
+  color: #5a4a38;
+}
+
+.value {
+  font-weight: 600;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1.6rem;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border: none;
+  border-radius: 999px;
+  padding: 0.75rem 1.6rem;
+  font-weight: 600;
+  background: #11854d;
+  color: #fff;
+  cursor: pointer;
+}
+
+#change-plan-btn {
+  background-image: url("/buttons/btn_Empty/btn_emptx_original.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-color: transparent;
+  color: #3b2a18;
+  min-width: clamp(180px, 16vw, 220px);
+}
+
+#change-plan-btn:hover {
+  background-image: url("/buttons/btn_Empty/btn_emptx_hover.png");
+}
+
+#change-plan-btn:active {
+  background-image: url("/buttons/btn_Empty/btn_emptx_click.png");
+}
+
+.btn.ghost {
+  background: transparent;
+  border: 1px solid #8a6a1f;
+  color: #8a6a1f;
+}
+
+.form-error {
+  margin-top: 1rem;
+  color: #b42318;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .page-header,
+  .page-main {
+    padding-left: 4vw;
+    padding-right: 4vw;
+  }
+
+  .profile-row {
+    grid-template-columns: 1fr;
+  }
+}

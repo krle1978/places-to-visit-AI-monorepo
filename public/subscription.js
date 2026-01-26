@@ -125,15 +125,35 @@ document.addEventListener("DOMContentLoaded", () => {
     radio.addEventListener("change", () => setSelectedPlan(radio.value));
   });
 
-  const initialPlan = getPlanFromToken(localStorage.getItem("token"));
+  const storedToken = localStorage.getItem("token");
+  const initialPlan = getPlanFromToken(storedToken);
   setSelectedPlan(initialPlan);
 
-  async function creditTokens(amount) {
+  if (storedToken) {
+    fetch("/api/auth/me", {
+      headers: { Authorization: `Bearer ${storedToken}` }
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to load profile.");
+        }
+        return data;
+      })
+      .then((data) => {
+        if (data?.plan) {
+          setSelectedPlan(data.plan);
+        }
+      })
+      .catch(() => {});
+  }
+
+  async function createPayPalOrder(amount) {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false };
 
     try {
-      const res = await fetch("/api/payments/paypal/credit", {
+      const res = await fetch("/api/payments/paypal/create-order", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -144,7 +164,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        console.warn("Failed to credit tokens", data);
+        console.warn("Failed to create PayPal order", data);
+        return { ok: false };
+      }
+
+      return {
+        ok: true,
+        orderId: data.id
+      };
+    } catch (err) {
+      console.warn("Order create request failed", err);
+      return { ok: false };
+    }
+  }
+
+  async function capturePayPalOrder(orderId) {
+    const token = localStorage.getItem("token");
+    if (!token || !orderId) return { ok: false };
+
+    try {
+      const res = await fetch("/api/payments/paypal/capture-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ orderId })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn("Failed to capture PayPal order", data);
         return { ok: false };
       }
 
@@ -154,7 +204,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const planKey =
         data.plan ||
-        PLAN_BY_AMOUNT[amount] ||
+        PLAN_BY_AMOUNT[data.amount] ||
         getPlanFromToken(data.token || localStorage.getItem("token")) ||
         "free";
 
@@ -167,7 +217,7 @@ document.addEventListener("DOMContentLoaded", () => {
         tokensAdded: data.tokensAdded
       };
     } catch (err) {
-      console.warn("Token credit request failed", err);
+      console.warn("Order capture request failed", err);
       return { ok: false };
     }
   }
@@ -186,30 +236,25 @@ document.addEventListener("DOMContentLoaded", () => {
         onClick: function () {
           setSelectedPlan(planKey);
         },
-        createOrder: function (data, actions) {
+        createOrder: function () {
           setSelectedPlan(planKey);
-          return actions.order.create({
-            purchase_units: [
-              {
-                amount: {
-                  value: amount.toString(),
-                  currency_code: "EUR"
-                },
-                description: "Donation of EUR " + amount
-              }
-            ]
+          return createPayPalOrder(amount).then((result) => {
+            if (!result?.ok || !result.orderId) {
+              throw new Error("Failed to create PayPal order.");
+            }
+            return result.orderId;
           });
         },
-        onApprove: function (data, actions) {
-          return actions.order.capture().then(async function (details) {
-            const creditResult = await creditTokens(amount);
-            const planToApply = creditResult?.plan || planKey;
+        onApprove: function (data) {
+          return capturePayPalOrder(data.orderID).then((captureResult) => {
+            if (!captureResult?.ok) {
+              throw new Error("Failed to capture PayPal order.");
+            }
+            const planToApply = captureResult?.plan || planKey;
             setSelectedPlan(planToApply);
             window.location.href =
               "thankyou.html?amount=" +
               amount +
-              "&name=" +
-              encodeURIComponent(details.payer.name.given_name) +
               "&plan=" +
               encodeURIComponent(planToApply);
           });

@@ -2,9 +2,12 @@
   position: fixed;
   top: 1rem;
   right: 4.4rem;
-  padding: 0.5rem 0.85rem;
-  background: #0f8c5a;
-  color: #ffffff;
+  padding: 0.55rem 1.1rem;
+  background: transparent;
+  background-image: url("/buttons/btn_Empty/btn_emptx_original.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  color: #3b2a18;
   border-radius: 10px;
   font-weight: 700;
   text-decoration: none;
@@ -13,7 +16,11 @@
 }
 
 .home-btn:hover {
-  background: #0c744a;
+  background-image: url("/buttons/btn_Empty/btn_emptx_hover.png");
+}
+
+.home-btn:active {
+  background-image: url("/buttons/btn_Empty/btn_emptx_click.png");
 }
 
 * {
@@ -25,6 +32,7 @@ body {
   font-family: "Inter", "Segoe UI", Arial, sans-serif;
   background: #f7f7f9;
   color: #16202a;
+  overflow-x: hidden;
 }
 
 a {
@@ -200,6 +208,7 @@ a:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 0.8rem;
+  width: 100%;
 }
 
 .plan-card {
@@ -211,6 +220,7 @@ a:hover {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .plan-card.selected {
@@ -419,6 +429,12 @@ a:hover {
 }
 
 @media (max-width: 640px) {
+  .home-btn {
+    right: 1rem;
+    top: 0.75rem;
+    padding: 0.5rem 0.9rem;
+  }
+
   .menu {
     display: none;
   }
@@ -429,9 +445,230 @@ a:hover {
 
   .donations {
     margin-top: 0.5rem;
+    padding: 0 4vw;
   }
 
   .subscription-grid {
     grid-template-columns: 1fr;
+  }
+
+  .donation-card {
+    padding: 1rem;
+  }
+
+  .plan-card {
+    padding: 1.8rem 0.9rem 1rem 1.3rem;
+  }
+
+  .plan-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .permissions {
+    padding-left: 0.9rem;
+  }
+
+  .crypto {
+    grid-template-columns: 1fr;
+  }
+
+  .qr {
+    width: 120px;
+  }
+}
+
+@media (max-width: 360px) {
+  .home-btn {
+    right: 0.75rem;
+    top: 0.6rem;
+    padding: 0.45rem 0.8rem;
+    font-size: 0.9rem;
+  }
+
+  .logo-icon {
+    width: 64px;
+    height: 64px;
+  }
+
+  .donations {
+    padding: 0 3.5vw;
+  }
+
+  .donation-card {
+    padding: 0.9rem;
+  }
+
+  .subscription-grid {
+    gap: 0.8rem;
+  }
+
+  .plan-card {
+    padding: 1.6rem 0.8rem 0.9rem 1.1rem;
+  }
+
+  .plan-card h3 {
+    font-size: 1.05rem;
+  }
+
+  .plan-price {
+    font-size: 0.95rem;
+  }
+
+  .plan-summary,
+  .permissions {
+    font-size: 0.95rem;
+  }
+
+  .permissions {
+    padding-left: 0.85rem;
+  }
+
+  .qr {
+    width: 110px;
+  }
+
+  .copy-btn {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 320px) {
+  .home-btn {
+    right: 0.6rem;
+    top: 0.5rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+  }
+
+  .logo-icon {
+    width: 56px;
+    height: 56px;
+  }
+
+  .donations {
+    padding: 0 3vw;
+  }
+
+  .donation-card {
+    padding: 0.8rem;
+  }
+
+  .plan-card {
+    padding: 1.5rem 0.7rem 0.8rem 1rem;
+  }
+
+  .plan-card h3 {
+    font-size: 1rem;
+  }
+
+  .plan-price {
+    font-size: 0.9rem;
+  }
+
+  .plan-summary,
+  .permissions {
+    font-size: 0.9rem;
+  }
+
+  .permissions {
+    padding-left: 0.75rem;
+  }
+
+  .plan-select {
+    top: 0.65rem;
+    left: 0.65rem;
+  }
+
+  .plan-select input[type="radio"] {
+    width: 16px;
+    height: 16px;
+  }
+
+  .plan-select-dot {
+    width: 7px;
+    height: 7px;
+  }
+
+  .qr {
+    width: 100px;
+  }
+
+  .copy-btn {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 280px) {
+  .home-btn {
+    right: 0.45rem;
+    top: 0.45rem;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  .logo-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .donations {
+    padding: 0 2.5vw;
+    gap: 0.9rem;
+  }
+
+  .donation-card {
+    padding: 0.7rem;
+  }
+
+  .subscription-grid {
+    gap: 0.7rem;
+  }
+
+  .plan-card {
+    padding: 1.3rem 0.6rem 0.8rem 0.9rem;
+  }
+
+  .plan-card h3 {
+    font-size: 0.95rem;
+  }
+
+  .plan-price {
+    font-size: 0.85rem;
+  }
+
+  .plan-summary,
+  .permissions {
+    font-size: 0.85rem;
+  }
+
+  .permissions {
+    padding-left: 0.7rem;
+  }
+
+  .plan-select {
+    top: 0.55rem;
+    left: 0.55rem;
+  }
+
+  .plan-select input[type="radio"] {
+    width: 15px;
+    height: 15px;
+  }
+
+  .plan-select-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .qr {
+    width: 92px;
+  }
+
+  .copy-btn {
+    padding: 0.35rem 0.55rem;
+    font-size: 0.8rem;
   }
 }

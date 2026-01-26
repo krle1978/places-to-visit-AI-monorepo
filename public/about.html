@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About Me</title>
+    <link rel="stylesheet" href="/styles/about.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <a class="home-btn" href="/">Home</a>
+      <img src="/logo/Places To Visit Logo_02.png" alt="Logo" class="logo-icon" />
+    </header>
+
+    <main class="page-main">
+      <section class="profile-card">
+        <h1>About Me</h1>
+        <p class="subtitle">Your account details</p>
+
+        <div class="profile-grid">
+          <div class="profile-row">
+            <span class="label">Name</span>
+            <span class="value" id="profile-name">-</span>
+          </div>
+          <div class="profile-row">
+            <span class="label">Email</span>
+            <span class="value" id="profile-email">-</span>
+          </div>
+          <div class="profile-row">
+            <span class="label">Plan</span>
+            <span class="value" id="profile-plan">-</span>
+          </div>
+          <div class="profile-row">
+            <span class="label">Tokens</span>
+            <span class="value" id="profile-tokens">-</span>
+          </div>
+        </div>
+
+        <div class="profile-actions">
+          <button class="btn" type="button" id="change-plan-btn">Change My Plan</button>
+          <button class="btn ghost" type="button" id="logout-btn">Logout</button>
+        </div>
+
+        <div class="form-error" id="profile-error" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script src="/about.js"></script>
+  </body>
+</html>

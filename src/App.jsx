@@ -82,6 +82,8 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
   const [activeAuthTab, setActiveAuthTab] = useState("login");
+  const [showAuth, setShowAuth] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const [error, setError] = useState("");
   const [signupMessage, setSignupMessage] = useState("");
@@ -251,7 +253,6 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
 
     const cleanup = [];
 
@@ -1498,6 +1499,19 @@ export default function App() {
     return () => scrollTopBtn.removeEventListener("click", scrollToTop);
   }, [token]);
 
+  useEffect(() => {
+    if (!showUserMenu) return;
+
+    const onDocClick = (event) => {
+      if (!event.target.closest(".header-user-menu")) {
+        setShowUserMenu(false);
+      }
+    };
+
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [showUserMenu]);
+
   async function signup() {
     setSignupError("");
     setSignupMessage("");
@@ -1577,6 +1591,8 @@ export default function App() {
       setToken(data.token);
       setUser(data.user);
       setPlan(data.user?.plan || getPlanFromToken(data.token));
+      setShowAuth(false);
+      setShowUserMenu(false);
     } catch (err) {
       setError(err.message);
     }
@@ -1588,6 +1604,7 @@ export default function App() {
     setUser(null);
     setPlan("free");
     setError("");
+    setShowUserMenu(false);
   }
 
   const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -1608,6 +1625,20 @@ export default function App() {
     .toLowerCase()
     .replace(/\s+/g, "_")
     .replace(/-+/g, "_");
+  const planLabels = {
+    free: "Free",
+    basic: "Basic",
+    premium: "Premium",
+    premium_plus: "Premium Plus"
+  };
+  const planIcons = {
+    free: "🆓",
+    basic: "⭐",
+    premium: "👑",
+    premium_plus: "💎"
+  };
+  const planLabel = planLabels[planKey] || "Free";
+  const planIcon = planIcons[planKey] || "🆓";
   const isFree = planKey === "free";
   const isPremium = planKey === "premium" || planKey === "premium_plus";
   const canGenerateCity = planKey === "basic" || isPremium;
@@ -1688,7 +1719,7 @@ export default function App() {
     }
   };
 
-  if (!token) {
+  if (!token && showAuth) {
     return (
       <div className="login-shell">
         <img
@@ -1731,6 +1762,13 @@ export default function App() {
               Signup
             </button>
           </div>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setShowAuth(false)}
+            >
+              Continue as Guest
+            </button>
 
             {activeAuthTab === "login" ? (
               <>
@@ -1925,24 +1963,77 @@ export default function App() {
           {user?.email && (
             <div className="header-user">
               Welcome {greetingName}
+              <span className="plan-icon" title={planLabel} aria-label={planLabel}>
+                {planIcon}
+              </span>
             </div>
           )}
         </div>
-        <button
-          className="image-btn logout-btn"
-          type="button"
-          onClick={logout}
-          aria-label="Logout"
-        >
-          <img
-            className="stateful-btn-image"
-            src="/buttons/Logout/btn_Logout_original.png"
-            alt="Logout"
-            data-default="/buttons/Logout/btn_Logout_original.png"
-            data-hover="/buttons/Logout/btn_Logout_hover.png"
-            data-active="/buttons/Logout/btn_Logout_click.png"
-          />
-        </button>
+        {token ? (
+          <div className="header-user-menu header-auth-btn">
+            <button
+              className="user-menu-btn"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={showUserMenu ? "true" : "false"}
+              onClick={() => setShowUserMenu((prev) => !prev)}
+            >
+              <span className="user-menu-label">
+                <span className="user-menu-icon" aria-hidden="true">
+                  {planIcon}
+                </span>
+                {greetingName || "My Account"}
+              </span>
+            </button>
+            {showUserMenu && (
+              <div className="user-menu-dropdown" role="menu">
+                <button
+                  className="user-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    window.location.href = "/about.html";
+                  }}
+                >
+                  About Me
+                </button>
+                <button
+                  className="user-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={openSubscriptions}
+                >
+                  Change My Plan
+                </button>
+                <button
+                  className="user-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={logout}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            className="image-btn header-auth-btn"
+            type="button"
+            onClick={() => setShowAuth(true)}
+            aria-label="Login"
+          >
+            <img
+              className="stateful-btn-image"
+              src="/buttons/Login_Signup/btn_LoginSignup_original.png"
+              alt="Login"
+              data-default="/buttons/Login_Signup/btn_LoginSignup_original.png"
+              data-hover="/buttons/Login_Signup/btn_LoginSignup_hover.png"
+              data-active="/buttons/Login_Signup/btn_LoginSignup_click.png"
+            />
+          </button>
+        )}
       </header>
 
       <main>
