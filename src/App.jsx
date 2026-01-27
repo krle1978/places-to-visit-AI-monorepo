@@ -70,6 +70,14 @@ function getPlanFromToken(token) {
   return decodeTokenPayload(token)?.plan || "free";
 }
 
+function isSafeNextPath(value) {
+  const next = String(value || "").trim();
+  if (!next) return false;
+  if (!next.startsWith("/")) return false;
+  if (next.startsWith("//")) return false;
+  return true;
+}
+
 export default function App() {
   const [email, setEmail] = useState("");
   const [loginName, setLoginName] = useState("");
@@ -84,6 +92,7 @@ export default function App() {
   const [activeAuthTab, setActiveAuthTab] = useState("login");
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [authNext, setAuthNext] = useState(null);
 
   const [error, setError] = useState("");
   const [signupMessage, setSignupMessage] = useState("");
@@ -100,11 +109,27 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlToken = params.get("token");
+    const authRequested = ["1", "true", "yes"].includes(String(params.get("auth") || "").toLowerCase());
+    const nextParam = params.get("next");
+
+    if (authRequested) {
+      setActiveAuthTab("login");
+      setShowAuth(true);
+      if (isSafeNextPath(nextParam)) {
+        setAuthNext(nextParam);
+      }
+      params.delete("auth");
+      params.delete("next");
+    }
+
     if (urlToken) {
       localStorage.setItem("token", urlToken);
       setToken(urlToken);
       setPlan(getPlanFromToken(urlToken));
       params.delete("token");
+    }
+
+    if (authRequested || urlToken) {
       const next = params.toString();
       const newUrl = window.location.pathname + (next ? `?${next}` : "");
       window.history.replaceState({}, document.title, newUrl);
@@ -1759,6 +1784,10 @@ export default function App() {
       setPlan(data.user?.plan || getPlanFromToken(data.token));
       setShowAuth(false);
       setShowUserMenu(false);
+      if (authNext) {
+        setAuthNext(null);
+        window.location.href = authNext;
+      }
     } catch (err) {
       setError(err.message);
     }
@@ -1798,13 +1827,13 @@ export default function App() {
     premium_plus: "Premium Plus"
   };
   const planIcons = {
-    free: "🆓",
-    basic: "⭐",
-    premium: "👑",
-    premium_plus: "💎"
+    free: "\u{1F195}",
+    basic: "\u2B50",
+    premium: "\u{1F451}",
+    premium_plus: "\u{1F48E}"
   };
   const planLabel = planLabels[planKey] || "Free";
-  const planIcon = planIcons[planKey] || "🆓";
+  const planIcon = planIcons[planKey] || "\u{1F195}";
   const isFree = planKey === "free";
   const isPremium = planKey === "premium" || planKey === "premium_plus";
   const canGenerateCity = planKey === "basic" || isPremium;
@@ -1931,7 +1960,10 @@ export default function App() {
             <button
               type="button"
               className="btn ghost"
-              onClick={() => setShowAuth(false)}
+              onClick={() => {
+                setShowAuth(false);
+                setAuthNext(null);
+              }}
             >
               Continue as Guest
             </button>
@@ -2184,21 +2216,34 @@ export default function App() {
             )}
           </div>
         ) : (
-          <button
-            className="image-btn header-auth-btn"
-            type="button"
-            onClick={() => setShowAuth(true)}
-            aria-label="Login"
-          >
-            <img
-              className="stateful-btn-image"
-              src="/buttons/Login_Signup/btn_LoginSignup_original.png"
-              alt="Login"
-              data-default="/buttons/Login_Signup/btn_LoginSignup_original.png"
-              data-hover="/buttons/Login_Signup/btn_LoginSignup_hover.png"
-              data-active="/buttons/Login_Signup/btn_LoginSignup_click.png"
-            />
-          </button>
+          <div className="header-auth-actions header-auth-btn">
+            <button
+              className="header-plan-btn"
+              type="button"
+              onClick={openSubscriptions}
+              aria-label="Make Your Plan"
+            >
+              Make Your Plan
+            </button>
+            <button
+              className="image-btn"
+              type="button"
+              onClick={() => {
+                setAuthNext(null);
+                setShowAuth(true);
+              }}
+              aria-label="Login"
+            >
+              <img
+                className="stateful-btn-image"
+                src="/buttons/Login_Signup/btn_LoginSignup_original.png"
+                alt="Login"
+                data-default="/buttons/Login_Signup/btn_LoginSignup_original.png"
+                data-hover="/buttons/Login_Signup/btn_LoginSignup_hover.png"
+                data-active="/buttons/Login_Signup/btn_LoginSignup_click.png"
+              />
+            </button>
+          </div>
         )}
       </header>
 

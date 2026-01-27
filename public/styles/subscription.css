@@ -286,6 +286,45 @@ a:hover {
   margin-top: auto;
 }
 
+.paypal-fallback {
+  margin-top: 0.6rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  border: 1px dashed #f0b429;
+  background: #fff8e6;
+  color: #8a5a00;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.paypal-fallback-message {
+  margin-bottom: 0.5rem;
+}
+
+.paypal-fallback-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1.1rem;
+  min-height: 40px;
+  background: transparent;
+  background-image: url("/buttons/btn_Empty/btn_emptx_original.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  color: #3b2a18;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.paypal-fallback-action:hover {
+  background-image: url("/buttons/btn_Empty/btn_emptx_hover.png");
+  text-decoration: none;
+}
+
+.paypal-fallback-action:active {
+  background-image: url("/buttons/btn_Empty/btn_emptx_click.png");
+}
+
 .btn-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

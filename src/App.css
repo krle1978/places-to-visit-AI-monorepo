@@ -32,6 +32,38 @@
   max-width: 100%;
 }
 
+.header-auth-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.header-plan-btn {
+  background-image: url("/buttons/btn_Empty/btn_emptx_original.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-color: transparent;
+  border: none;
+  color: #3b2a18;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0.65rem 1.2rem;
+  min-height: 44px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.header-plan-btn:hover {
+  background-image: url("/buttons/btn_Empty/btn_emptx_hover.png");
+}
+
+.header-plan-btn:active {
+  background-image: url("/buttons/btn_Empty/btn_emptx_click.png");
+}
+
 .header-auth-btn .stateful-btn-image {
   width: clamp(110px, 12vw, 160px);
   height: auto;
@@ -330,6 +362,10 @@
   width: clamp(180px, 40vw, 260px);
   height: auto;
   display: block;
+}
+
+.site-header .header-auth-btn .stateful-btn-image {
+  width: clamp(110px, 12vw, 160px);
 }
 
 .image-btn-link img {
@@ -1050,7 +1086,7 @@
     width: auto;
   }
 
-  .header-auth-btn .stateful-btn-image {
+  .site-header .header-auth-btn .stateful-btn-image {
     width: clamp(90px, 22vw, 130px);
   }
 
