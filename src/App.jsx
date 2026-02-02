@@ -1,5 +1,5 @@
 console.log("NEW APP VERSION LOADED");
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 const API = import.meta.env.VITE_API_URL || window.location.origin;
@@ -89,10 +89,12 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
+  const [isServerReady, setIsServerReady] = useState(false);
   const [activeAuthTab, setActiveAuthTab] = useState("login");
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [authNext, setAuthNext] = useState(null);
+  const signupInFlightRef = useRef(false);
 
   const [error, setError] = useState("");
   const [signupMessage, setSignupMessage] = useState("");
@@ -134,6 +136,32 @@ export default function App() {
       const newUrl = window.location.pathname + (next ? `?${next}` : "");
       window.history.replaceState({}, document.title, newUrl);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    let timeoutId = null;
+
+    const pingServer = async () => {
+      try {
+        const res = await fetch(`${API}/`, { signal: controller.signal, cache: "no-store" });
+        if (!res.ok) throw new Error("Server not ready.");
+        if (!cancelled) setIsServerReady(true);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        if (cancelled) return;
+        timeoutId = window.setTimeout(pingServer, 900);
+      }
+    };
+
+    pingServer();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {
@@ -282,6 +310,7 @@ export default function App() {
     const cleanup = [];
 
     const gpsBtn = document.getElementById("gpsBtn");
+    const gpsImg = gpsBtn?.querySelector("img.stateful-btn-image");
     const citySearchInput = document.getElementById("city-search-input");
     const citySearchBtn = document.getElementById("city-search-btn");
     const citySearchSuggestions = document.getElementById("city-search-suggestions");
@@ -1071,6 +1100,7 @@ export default function App() {
     }
 
     async function resolveGeoLocation() {
+      if (!isServerReady) return;
       if (!gpsBtn || isGeoLoading) return;
       if (!navigator.geolocation) {
         errorMsg.textContent = "Geolocation is not supported.";
@@ -1080,7 +1110,7 @@ export default function App() {
       openPlannerPanel();
       errorMsg.textContent = "";
       isGeoLoading = true;
-      gpsBtn.dataset.locked = "true";
+      if (gpsImg) gpsImg.dataset.locked = "true";
 
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -1127,22 +1157,25 @@ export default function App() {
             errorMsg.textContent = err?.message || "Failed to resolve location.";
           } finally {
             isGeoLoading = false;
-            gpsBtn.dataset.locked = "false";
+            if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
           }
         },
         (err) => {
           console.error(err);
           errorMsg.textContent = "Unable to access location.";
           isGeoLoading = false;
-          gpsBtn.dataset.locked = "false";
+          if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
         },
         { enableHighAccuracy: false, timeout: 10000 }
       );
     }
 
     if (gpsBtn) {
+      if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
+
       const onGpsClick = (event) => {
         event.preventDefault();
+        if (!isServerReady) return;
         resolveGeoLocation();
       };
 
@@ -1154,6 +1187,14 @@ export default function App() {
       const canGenerateCity = ["basic", "premium", "premium_plus"].includes(planKey);
       let suggestTimer = null;
       let suggestRequestId = 0;
+      const citySearchImg = citySearchBtn.querySelector("img.stateful-btn-image");
+
+      const syncCitySearchBtnState = () => {
+        const raw = citySearchInput.value.trim();
+        const shouldDisable = !isServerReady || isSearchLoading || !raw;
+        citySearchBtn.disabled = shouldDisable;
+        if (citySearchImg) citySearchImg.dataset.locked = shouldDisable ? "true" : "false";
+      };
 
       const clearCitySuggestions = () => {
         if (!citySearchSuggestions) return;
@@ -1267,6 +1308,7 @@ export default function App() {
         const cityName = target.dataset.city;
         const countryName = target.dataset.country;
         citySearchInput.value = cityName;
+        syncCitySearchBtnState();
         clearCitySuggestions();
         handleSuggestionSelection(countryName, cityName);
       };
@@ -1278,10 +1320,6 @@ export default function App() {
         const interests = (interestsInput?.value || "").trim();
         clearCitySuggestions();
         if (!raw) {
-          if (canGenerateCity) {
-            resolveGeoLocation();
-            return;
-          }
           setMissingCity("");
           setMissingCityMessage("");
           setMissingCitySuggestion(null);
@@ -1305,7 +1343,7 @@ export default function App() {
         setMissingCityMessage("");
         setCityGenerateError("");
         isSearchLoading = true;
-        citySearchBtn.disabled = true;
+        syncCitySearchBtnState();
 
         try {
           if (isPremiumPlan && interests) {
@@ -1403,7 +1441,7 @@ export default function App() {
           errorMsg.textContent = err?.message || "Failed to find city.";
         } finally {
           isSearchLoading = false;
-          citySearchBtn.disabled = false;
+          syncCitySearchBtnState();
         }
       };
 
@@ -1416,6 +1454,7 @@ export default function App() {
 
       const onCitySearchInput = () => {
         const raw = citySearchInput.value.trim();
+        syncCitySearchBtnState();
         if (!raw || raw.length > 10) {
           clearCitySuggestions();
           return;
@@ -1455,6 +1494,7 @@ export default function App() {
       }
       document.addEventListener("click", onDocumentClick);
 
+      syncCitySearchBtnState();
       cleanup.push(() => citySearchBtn.removeEventListener("click", onCitySearch));
       cleanup.push(() => citySearchInput.removeEventListener("input", onCitySearchInput));
       cleanup.push(() => citySearchInput.removeEventListener("keydown", onCitySearchKeydown));
@@ -1676,18 +1716,42 @@ export default function App() {
     document.dispatchEvent(new Event("routePlanner:ready"));
 
     return () => cleanup.forEach((fn) => fn());
-  }, [token]);
+  }, [token, isServerReady]);
 
   useEffect(() => {
     const scrollTopBtn = document.getElementById("scrollToTopBtn");
     if (!scrollTopBtn) return;
 
+    const updateVisibility = () => {
+      if (window.scrollY > 10) {
+        scrollTopBtn.classList.add("is-visible");
+      } else {
+        scrollTopBtn.classList.remove("is-visible");
+      }
+    };
+
     const scrollToTop = () => {
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
+    let rafId = 0;
+    const onScroll = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        updateVisibility();
+      });
+    };
+
+    updateVisibility();
     scrollTopBtn.addEventListener("click", scrollToTop);
-    return () => scrollTopBtn.removeEventListener("click", scrollToTop);
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      scrollTopBtn.removeEventListener("click", scrollToTop);
+      window.removeEventListener("scroll", onScroll);
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
   }, [token]);
 
   useEffect(() => {
@@ -1733,6 +1797,8 @@ export default function App() {
       return;
     }
 
+    if (signupInFlightRef.current) return;
+    signupInFlightRef.current = true;
     setSignupLoading(true);
     try {
       const res = await fetch(`${API}/api/auth/signup`, {
@@ -1742,13 +1808,20 @@ export default function App() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Signup failed.");
+      if (!res.ok) {
+        if (res.status === 409 && String(data?.error || "").includes("Signup already pending")) {
+          setSignupMessage(data.error);
+          return;
+        }
+        throw new Error(data.error || "Signup failed.");
+      }
 
       setSignupMessage(data.message || "Check your email to confirm your account.");
     } catch (err) {
       setSignupError(err.message);
     } finally {
       setSignupLoading(false);
+      signupInFlightRef.current = false;
     }
   }
 
@@ -2155,7 +2228,7 @@ export default function App() {
         <div className="header-title">
           <img
             className="brand"
-            src="/Banner/Places To Visit Banner.png"
+            src="/Banner/City_Path_Banner.png"
             alt="Places To Visit"
           />
           {user?.email && (
@@ -2250,23 +2323,47 @@ export default function App() {
       <main>
         <section className="hero">
           <div className="hero-text">
-            <h1>Plan Your Perfect City Escape</h1>
-            <p className="tagline">Smart city travel planner for curious young minds.</p>
-            <div className="hero-image">
-              <img
-                src="/backgrounds/main-hero.webp"
-                alt="Young travelers exploring Europe"
-              />
-            </div>
-            <p>
-              Explore the coolest European cities through what you vibe with - art, history,
-              architecture, street food, nightlife and more. Whether you are into chill museums or
-              urban adventures, our smart planner builds an itinerary that is totally your style.
+            <h1>Explore European cities your way.</h1>
+            <p className="tagline">
+              CityPath is a Travel Assistance platform that creates personalized city routes for
+              independent travelers across Europe.
             </p>
+
+            <div className="hero-cta-row">
+              <button
+                type="button"
+                className="hero-cta hero-cta-primary"
+                onClick={() => {
+                  document
+                    .getElementById("route-planner-panel")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                Build My City Path
+              </button>
+              <button
+                type="button"
+                className="hero-cta hero-cta-secondary"
+                onClick={() => {
+                  window.location.href = "/about.html";
+                }}
+              >
+                Discover How It Works
+              </button>
+            </div>
           </div>
 
-          <div className="hero-buttons">
-            <a href="locaton.html" className="image-btn-link" aria-label="I'm Here" id="gpsBtn">
+          <div className="hero-visual" aria-hidden="true"></div>
+
+          <div className="hero-actions">
+            <a
+              href="locaton.html"
+              className={`image-btn-link${isServerReady ? "" : " is-disabled"}`}
+              aria-label="I'm Here"
+              aria-disabled={!isServerReady}
+              tabIndex={isServerReady ? undefined : -1}
+              id="gpsBtn"
+            >
               <img
                 className="stateful-btn-image"
                 src="/buttons/IM_Here/btn_imhere_original.png"
@@ -2283,6 +2380,7 @@ export default function App() {
                 type="text"
                 maxLength={10}
                 placeholder="Type city (max 10)"
+                disabled={!isServerReady}
               />
               <div
                 id="city-search-suggestions"
@@ -2419,16 +2517,17 @@ export default function App() {
                     className="image-btn"
                     type="button"
                     disabled
-                    aria-label="Build My Plan"
+                    aria-label="Create My Route"
                   >
                     <img
                       className="stateful-btn-image"
-                      src="/buttons/Build My Plan/btn_BuildMyPlan_original.png"
-                      alt="Build My Plan"
-                      data-default="/buttons/Build My Plan/btn_BuildMyPlan_original.png"
-                      data-hover="/buttons/Build My Plan/btn_BuildMyPlan_hover.png"
-                      data-active="/buttons/Build My Plan/btn_BuildMyPlan_click.png"
+                      src="/buttons/btn_Empty/btn_emptx_original.png"
+                      alt="Create My Route"
+                      data-default="/buttons/btn_Empty/btn_emptx_original.png"
+                      data-hover="/buttons/btn_Empty/btn_emptx_hover.png"
+                      data-active="/buttons/btn_Empty/btn_emptx_click.png"
                     />
+                    <span className="route-submit-label">Create My Route</span>
                   </button>
 
                   <div id="route-error" className="route-error-message"></div>
