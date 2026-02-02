@@ -980,7 +980,10 @@ app.post("/api/auth/signup", async (req, res) => {
     const pending = await readJsonFile(PENDING_USERS_PATH, []);
     const pendingExisting = pending.find((u) => normalizeEmail(u.email) === normalizedEmail);
     if (pendingExisting) {
-      return res.status(409).json({ error: "Signup already pending. Check your email to confirm." });
+      return res.json({
+        pending: true,
+        message: "Signup already pending. Check your email to confirm."
+      });
     }
     const pendingName = pending.find((u) => normalizeUserName(u.name) === normalizedName);
     if (pendingName) {
