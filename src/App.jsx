@@ -205,7 +205,7 @@ export default function App() {
       cancelled = true;
       controller.abort();
     };
-  }, [token]);
+  }, [token, user?.email, showAuth, showUserMenu]);
 
   useEffect(() => {
     if (activeAuthTab !== "signup") {
@@ -1357,6 +1357,7 @@ export default function App() {
               },
               body: JSON.stringify({ question })
             });
+            applyTokenMeta(aiData?._meta);
 
             selectedCityObj = {
               ...aiData,
@@ -1534,6 +1535,7 @@ export default function App() {
               })
             }
           );
+          applyTokenMeta(payload?._meta);
 
           const updated = await fetchJsonWithFallback(
             `/api/countries/${encodeURIComponent(fileName)}`
@@ -1911,6 +1913,28 @@ export default function App() {
   const isPremium = planKey === "premium" || planKey === "premium_plus";
   const canGenerateCity = planKey === "basic" || isPremium;
   const greetingName = user?.name || user?.email || "";
+  const tokenCount = user ? Number(user.tokens || 0) : null;
+
+  const applyTokenMeta = (meta) => {
+    if (!meta) return;
+    const nextTokens = Number(meta.tokensRemaining);
+    const nextPlan = meta.plan ? String(meta.plan) : null;
+
+    if (Number.isFinite(nextTokens)) {
+      setUser((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          tokens: nextTokens,
+          plan: nextPlan || prev.plan
+        };
+      });
+    }
+
+    if (nextPlan) {
+      setPlan(nextPlan);
+    }
+  };
 
   async function generateCityRoute(cityName = missingCity) {
     if (!cityName || cityGenerateLoading) return;
@@ -1934,6 +1958,7 @@ export default function App() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to Generate This City data.");
+      applyTokenMeta(data?._meta);
 
       if (window.routePlannerEasy?.selectLocation) {
         window.routePlannerEasy.selectLocation(data.country, data.city, true, true);
@@ -2234,6 +2259,9 @@ export default function App() {
           {user?.email && (
             <div className="header-user">
               Welcome {greetingName}
+              {typeof tokenCount === "number" && (
+                <span aria-label={`Tokens: ${tokenCount}`}>({tokenCount} tokens)</span>
+              )}
               <span className="plan-icon" title={planLabel} aria-label={planLabel}>
                 {planIcon}
               </span>
@@ -2254,6 +2282,9 @@ export default function App() {
                   {planIcon}
                 </span>
                 {greetingName || "My Account"}
+                {typeof tokenCount === "number" && (
+                  <span aria-label={`Tokens: ${tokenCount}`}>({tokenCount})</span>
+                )}
               </span>
             </button>
             {showUserMenu && (
@@ -2374,6 +2405,27 @@ export default function App() {
               />
             </a>
 
+            {typeof tokenCount === "number" && (
+              <div className="token-panel" aria-label={`Tokens: ${tokenCount}`}>
+                <div className="token-count">Tokens: {tokenCount}</div>
+                <button
+                  className="image-btn token-upgrade-btn"
+                  type="button"
+                  aria-label="Upgrade plan"
+                  onClick={openSubscriptions}
+                >
+                  <img
+                    className="stateful-btn-image"
+                    src="/buttons/btn_Empty/btn_emptx_original.png"
+                    alt="Upgrade"
+                    data-default="/buttons/btn_Empty/btn_emptx_original.png"
+                    data-hover="/buttons/btn_Empty/btn_emptx_hover.png"
+                    data-active="/buttons/btn_Empty/btn_emptx_click.png"
+                  />
+                  <span className="token-upgrade-label">Upgrade ↑</span>
+                </button>
+              </div>
+            )}
             <div className="city-search">
               <input
                 id="city-search-input"
