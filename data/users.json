@@ -38,5 +38,13 @@
     "passwordHash": "$2b$10$H/D3wYXGCKnWaUZt9EKbSuGzxcspZRPbM0jhRV6Mm.Htfpg0Y4tPG",
     "plan": "premium",
     "tokens": 20
+  },
+  {
+    "id": "u_1770284730054",
+    "name": "rade1",
+    "email": "krstic.rade+test1@gmail.com",
+    "passwordHash": "$2b$10$FSX2wHmq6ciJ5oudN.DFkeVxa2qN3dCCITvOToKs1L1XNdQQ2cLP2",
+    "plan": "free",
+    "tokens": 0
   }
 ]

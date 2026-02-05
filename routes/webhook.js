@@ -24,7 +24,9 @@ const AMOUNT_TO_PLAN = {
 
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
-const PAYPAL_BASE_URL = process.env.PAYPAL_BASE_URL || "https://api-m.sandbox.paypal.com";
+const DEFAULT_PAYPAL_BASE_URL = "https://api-m.sandbox.paypal.com";
+const PAYPAL_BASE_URL_EXPLICIT = Boolean(process.env.PAYPAL_BASE_URL);
+let payPalBaseUrl = process.env.PAYPAL_BASE_URL || DEFAULT_PAYPAL_BASE_URL;
 const PAYPAL_MERCHANT_ID = process.env.PAYPAL_MERCHANT_ID || "";
 
 const PLAN_RANK = {
@@ -65,33 +67,72 @@ async function getPayPalAccessToken() {
   assertPayPalConfigured();
 
   const credentials = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
-  const response = await fetch(`${PAYPAL_BASE_URL}/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: "grant_type=client_credentials"
-  });
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(data?.error_description || "Failed to fetch PayPal access token.");
-    err.status = 502;
-    throw err;
+  async function fetchTokenFor(baseUrl) {
+    const response = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: "grant_type=client_credentials"
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const err = new Error(data?.error_description || "Failed to fetch PayPal access token.");
+      err.status = 502;
+      err.paypal = { baseUrl, data };
+      throw err;
+    }
+
+    if (!data?.access_token) {
+      const err = new Error("PayPal access token is missing.");
+      err.status = 502;
+      err.paypal = { baseUrl, data };
+      throw err;
+    }
+
+    return data.access_token;
   }
 
-  if (!data?.access_token) {
-    const err = new Error("PayPal access token is missing.");
-    err.status = 502;
+  try {
+    return await fetchTokenFor(payPalBaseUrl);
+  } catch (err) {
+    const description = String(err?.paypal?.data?.error_description || err?.message || "");
+    const code = String(err?.paypal?.data?.error || "");
+    const looksLikeInvalidClient =
+      code === "invalid_client" || description.toLowerCase().includes("client authentication failed");
+
+    if (!PAYPAL_BASE_URL_EXPLICIT && looksLikeInvalidClient) {
+      const fallbackBaseUrl =
+        payPalBaseUrl === DEFAULT_PAYPAL_BASE_URL
+          ? "https://api-m.paypal.com"
+          : DEFAULT_PAYPAL_BASE_URL;
+
+      try {
+        const token = await fetchTokenFor(fallbackBaseUrl);
+        console.warn(
+          `PayPal auth succeeded on fallback base URL. Consider setting PAYPAL_BASE_URL=${fallbackBaseUrl}.`
+        );
+        payPalBaseUrl = fallbackBaseUrl;
+        return token;
+      } catch (fallbackErr) {
+        throw fallbackErr;
+      }
+    }
+
+    if (looksLikeInvalidClient) {
+      err.message =
+        "Client Authentication failed. Check PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET and ensure PAYPAL_BASE_URL matches (sandbox: https://api-m.sandbox.paypal.com, live: https://api-m.paypal.com).";
+    }
+
     throw err;
   }
-
-  return data.access_token;
 }
 
 async function paypalRequest(pathname, { method = "GET", accessToken, body } = {}) {
-  const response = await fetch(`${PAYPAL_BASE_URL}${pathname}`, {
+  const response = await fetch(`${payPalBaseUrl}${pathname}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,

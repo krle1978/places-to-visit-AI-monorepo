@@ -17,6 +17,7 @@ import { registerWebhookRoutes } from "./routes/webhook.js";
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 registerWebhookRoutes(app);
@@ -38,6 +39,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
 const COUNTRIES_DIR = path.join(DATA_DIR, "countries");
 const USERS_PATH = path.join(DATA_DIR, "users.json");
+const PENDING_USERS_PATH = path.join(DATA_DIR, "pending_users.json");
 const cityGeoCache = new Map();
 const smtpPort = Number(process.env.SMTP_PORT || 587);
 const mailTransport = process.env.SMTP_HOST
@@ -51,6 +53,10 @@ const mailTransport = process.env.SMTP_HOST
     })
   : null;
 const SMTP_FROM = process.env.SMTP_FROM || process.env.SMTP_USER || "";
+const PENDING_SIGNUP_TTL_MS = Number(process.env.PENDING_SIGNUP_TTL_MS || 24 * 60 * 60 * 1000);
+const PENDING_RESEND_MIN_INTERVAL_MS = Number(
+  process.env.PENDING_RESEND_MIN_INTERVAL_MS || 60 * 1000
+);
 
 
 function normalizeName(value) {
@@ -126,6 +132,36 @@ function buildClientUrl(req, pathname) {
   return new URL(pathname, base).toString();
 }
 
+function buildPublicApiBase(req) {
+  const rawBase =
+    process.env.PUBLIC_API_URL ||
+    process.env.API_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    `${req.protocol}://${req.get("host")}`;
+  const value = String(rawBase || "").trim();
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  return withProtocol.replace(/\/+$/, "");
+}
+
+function buildConfirmUrl(req, token) {
+  const base = buildPublicApiBase(req);
+  const url = new URL("/api/auth/confirm", base);
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
+function safeParseDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isPendingExpired(entry, now = new Date()) {
+  const created = safeParseDate(entry?.createdAt);
+  if (!created) return false;
+  return now.getTime() - created.getTime() > PENDING_SIGNUP_TTL_MS;
+}
+
 async function sendSignupEmail(to, confirmUrl) {
   if (!mailTransport) {
     throw new Error("Email transport is not configured.");
@@ -133,13 +169,15 @@ async function sendSignupEmail(to, confirmUrl) {
   if (!SMTP_FROM) {
     throw new Error("SMTP_FROM is not configured.");
   }
-  await mailTransport.sendMail({
+  const info = await mailTransport.sendMail({
     from: SMTP_FROM,
     to,
     subject: "Confirm your account",
     text: `Please confirm your account by opening this link: ${confirmUrl}`,
     html: `<p>Please confirm your account by clicking the link below:</p><p><a href="${confirmUrl}">Confirm account</a></p>`
   });
+  console.log("✅ Signup email sent", { to, messageId: info?.messageId });
+  return info;
 }
 
 function resolveCountryFile(fileName) {
@@ -451,6 +489,10 @@ app.post("/api/city/add", requireAuth, async (req, res) => {
     const result = await addCityIfMissing(city);
     if (!result?.exists) {
       await consumeToken(context.users, context.user);
+      return res.json({
+        ...result,
+        _meta: { tokensRemaining: context.user.tokens, plan: context.user.plan }
+      });
     }
     return res.json(result);
   } catch (err) {
@@ -531,7 +573,11 @@ Rules: interests is an object; use realistic well-known locations; Google Maps s
     const jsonText = response.output[0].content[0].text;
     const parsed = JSON.parse(jsonText);
 
-    return res.json(parsed);
+    await consumeToken(context.users, context.user);
+    return res.json({
+      ...parsed,
+      _meta: { tokensRemaining: context.user.tokens, plan: context.user.plan }
+    });
   } catch (err) {
     console.error("OPENAI ERROR:");
     console.error(err);
@@ -604,8 +650,10 @@ Rules: include breakfast/lunch/dinner entries; use realistic locations tied to i
     const parsed = JSON.parse(jsonText);
 
     await consumeToken(context.users, context.user);
-    await consumeToken(context.users, context.user);
-    return res.json(parsed);
+    return res.json({
+      ...parsed,
+      _meta: { tokensRemaining: context.user.tokens, plan: context.user.plan }
+    });
   } catch (err) {
     console.error("OPENAI ERROR:");
     console.error(err);
@@ -783,6 +831,10 @@ app.post("/api/countries/:file/cities", requireAuth, async (req, res) => {
     const result = await generateCityInFile(fileName, city, country);
     if (result?.created) {
       await consumeToken(context.users, context.user);
+      return res.json({
+        ...result,
+        _meta: { tokensRemaining: context.user.tokens, plan: context.user.plan }
+      });
     }
     return res.json(result);
   } catch (err) {
@@ -842,7 +894,10 @@ app.post("/api/cities/generate", requireAuth, async (req, res) => {
 
     const result = await generateCityInFile(match.file, trimmedCity, match.country);
     await consumeToken(context.users, context.user);
-    return res.json(result);
+    return res.json({
+      ...result,
+      _meta: { tokensRemaining: context.user.tokens, plan: context.user.plan }
+    });
   } catch (err) {
     console.error(err);
     const status = err.status || 500;
@@ -904,8 +959,6 @@ app.get("/api/countries/:file", (req, res) => {
 app.listen(process.env.PORT || 3001, () => {
   console.log(`API running on http://localhost:${process.env.PORT || 3001}`);
 });
-
-const PENDING_USERS_PATH = path.join(DATA_DIR, "pending_users.json");
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   try {
@@ -978,14 +1031,49 @@ app.post("/api/auth/signup", async (req, res) => {
     }
 
     const pending = await readJsonFile(PENDING_USERS_PATH, []);
-    const pendingExisting = pending.find((u) => normalizeEmail(u.email) === normalizedEmail);
-    if (pendingExisting) {
-      return res.json({
-        pending: true,
-        message: "Signup already pending. Check your email to confirm."
-      });
+    const now = new Date();
+
+    const activePending = pending.filter((entry) => !isPendingExpired(entry, now));
+    if (activePending.length !== pending.length) {
+      await writeJsonFile(PENDING_USERS_PATH, activePending);
     }
-    const pendingName = pending.find((u) => normalizeUserName(u.name) === normalizedName);
+
+    const pendingExisting = activePending.find((u) => normalizeEmail(u.email) === normalizedEmail);
+    if (pendingExisting) {
+      const lastSentAt = safeParseDate(pendingExisting.lastEmailSentAt);
+      const tooSoon =
+        lastSentAt &&
+        now.getTime() - lastSentAt.getTime() < PENDING_RESEND_MIN_INTERVAL_MS;
+
+      if (tooSoon) {
+        const waitSeconds = Math.ceil(
+          (PENDING_RESEND_MIN_INTERVAL_MS - (now.getTime() - lastSentAt.getTime())) / 1000
+        );
+        return res.json({
+          pending: true,
+          message: `Signup already pending. Please wait ${waitSeconds}s before resending.`
+        });
+      }
+
+      const confirmUrl = buildConfirmUrl(req, pendingExisting.token);
+      try {
+        await sendSignupEmail(pendingExisting.email, confirmUrl);
+        pendingExisting.lastEmailSentAt = now.toISOString();
+        pendingExisting.emailSendAttempts = Number(pendingExisting.emailSendAttempts || 0) + 1;
+        await writeJsonFile(PENDING_USERS_PATH, activePending);
+        return res.json({
+          pending: true,
+          message: "Signup already pending. Confirmation email re-sent. Check inbox/spam."
+        });
+      } catch (mailErr) {
+        pendingExisting.lastEmailErrorAt = now.toISOString();
+        pendingExisting.lastEmailError = String(mailErr?.message || mailErr);
+        pendingExisting.emailSendAttempts = Number(pendingExisting.emailSendAttempts || 0) + 1;
+        await writeJsonFile(PENDING_USERS_PATH, activePending);
+        throw mailErr;
+      }
+    }
+    const pendingName = activePending.find((u) => normalizeUserName(u.name) === normalizedName);
     if (pendingName) {
       return res.status(409).json({ error: "Name already exists." });
     }
@@ -999,19 +1087,23 @@ app.post("/api/auth/signup", async (req, res) => {
       passwordHash,
       plan: "free",
       token,
+      emailSendAttempts: 0,
       createdAt: new Date().toISOString()
     };
 
-    pending.push(entry);
-    await writeJsonFile(PENDING_USERS_PATH, pending);
+    activePending.push(entry);
+    await writeJsonFile(PENDING_USERS_PATH, activePending);
 
-    const confirmUrl = `${req.protocol}://${req.get("host")}/api/auth/confirm?token=${token}`;
+    const confirmUrl = buildConfirmUrl(req, token);
 
     try {
       await sendSignupEmail(normalizedEmail, confirmUrl);
+      entry.lastEmailSentAt = new Date().toISOString();
+      entry.emailSendAttempts = 1;
+      await writeJsonFile(PENDING_USERS_PATH, activePending);
     } catch (mailErr) {
-      pending.pop();
-      await writeJsonFile(PENDING_USERS_PATH, pending);
+      activePending.pop();
+      await writeJsonFile(PENDING_USERS_PATH, activePending);
       throw mailErr;
     }
 
