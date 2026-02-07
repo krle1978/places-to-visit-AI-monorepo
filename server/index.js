@@ -1,4 +1,3 @@
-import fetch from "node-fetch";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -6,7 +5,7 @@ import OpenAI from "openai";
 import { addCityIfMissing } from "./utils/addCityToCountry.js";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -969,12 +968,18 @@ app.get("/api/countries/:file", (req, res) => {
 });
 
 const port = Number(process.env.PORT || 3001);
-const server = app.listen(port, () => {
-  console.log(`API running on http://localhost:${port}`);
-  setTimeout(() => {
-    if (typeof server?.ref === "function") server.ref();
-  }, 0);
-});
+let server = null;
+// When deployed to Vercel (serverless), or when imported, do not start a long-lived listener.
+const entryPath = process.argv?.[1];
+const isEntrypoint = entryPath ? import.meta.url === pathToFileURL(entryPath).href : false;
+if (!process.env.VERCEL && isEntrypoint) {
+  server = app.listen(port, () => {
+    console.log(`API running on http://localhost:${port}`);
+    setTimeout(() => {
+      if (typeof server?.ref === "function") server.ref();
+    }, 0);
+  });
+}
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   try {
@@ -1235,3 +1240,5 @@ app.post("/api/auth/login", async (req, res) => {
     }
   });
 });
+
+export default app;

@@ -131,6 +131,28 @@ document.addEventListener("DOMContentLoaded", () => {
     premium_plus: { amount: 20, containerId: "#paypal-button-container-20" }
   };
 
+  async function fetchJson(url, options) {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+
+    if (!res.ok) {
+      const isHtml = /^\s*</.test(text);
+      const message =
+        data?.error || (isHtml ? `Request failed (HTTP ${res.status}).` : text) || `HTTP ${res.status}`;
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
+    }
+
+    return data ?? {};
+  }
+
   function showPayPalFallback(message, { showAuthAction = false } = {}) {
     Object.values(PLAN_CONFIG).forEach((config) => {
       const container = document.querySelector(config.containerId);
@@ -179,10 +201,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return Promise.resolve(true);
     }
 
-    return fetch("/api/payments/paypal/config")
-      .then((res) => res.json())
-      .then((data) => {
-        const clientId = data?.clientId;
+    return fetchJson("/api/payments/paypal/config").then((data) => {
+      const clientId = data?.clientId;
         if (!clientId) {
           throw new Error("PayPal client ID missing.");
         }
@@ -343,6 +363,12 @@ document.addEventListener("DOMContentLoaded", () => {
       })
       .catch((err) => {
         console.error(err);
+        if (err?.status === 404) {
+          showPayPalFallback(
+            "Payments are unavailable on this deployment (API not found). Please try again later."
+          );
+          return;
+        }
         showPayPalFallback("PayPal failed to load. Please check your connection and try again.");
       });
   }
