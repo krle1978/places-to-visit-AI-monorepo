@@ -1,8 +1,9 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/[...path].mjs", "use": "@vercel/node" },
-    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://places-to-visit-api-backend.onrender.com/api/:path*"
+    }
   ]
 }
-
