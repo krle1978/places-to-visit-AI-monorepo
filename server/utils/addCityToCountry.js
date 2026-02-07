@@ -2,17 +2,28 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+// Load env from `server/.env` regardless of where the script is started from.
+dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 
 const COUNTRIES_PATH = path.resolve(
   process.cwd(),
   "assets/recommendations/countries"
 );
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+let openAiClient = null;
+function getOpenAiClient() {
+  if (openAiClient) return openAiClient;
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error(
+      "OPENAI_API_KEY is not configured. Create server/.env (see server/.env.example) or set the env var before starting the server."
+    );
+  }
+  openAiClient = new OpenAI({ apiKey });
+  return openAiClient;
+}
 
 /**
  * MAIN FUNCTION
@@ -47,7 +58,7 @@ export async function addCityIfMissing(cityName) {
   // --------------------------------------------------
   // 2. CITY NOT FOUND → GENERATE WITH OPENAI
   // --------------------------------------------------
-  const aiResponse = await client.responses.create({
+  const aiResponse = await getOpenAiClient().responses.create({
     model: "gpt-4.1-mini",
     text: {
       format: { type: "json_object" }

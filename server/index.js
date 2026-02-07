@@ -14,7 +14,8 @@ import nodemailer from "nodemailer";
 import { requireAuth } from "./middleware/auth.js";
 import { registerWebhookRoutes } from "./routes/webhook.js";
 
-dotenv.config();
+// Load env from `server/.env` regardless of where the process is started from.
+dotenv.config({ path: fileURLToPath(new URL(".env", import.meta.url)) });
 
 const app = express();
 app.set("trust proxy", 1);
@@ -30,9 +31,20 @@ app.get("/", (req, res) => {
   });
 });
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+let openAiClient = null;
+function getOpenAiClient() {
+  if (openAiClient) return openAiClient;
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    const err = new Error(
+      "OPENAI_API_KEY is not configured. Create server/.env (see server/.env.example) or set the env var before starting the server."
+    );
+    err.status = 500;
+    throw err;
+  }
+  openAiClient = new OpenAI({ apiKey });
+  return openAiClient;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -275,7 +287,7 @@ async function generateCityInFile(fileName, city, fallbackCountry) {
   }
 
   const promptCountry = parsed?.name || fallbackCountry || "";
-  const response = await client.responses.create({
+  const response = await getOpenAiClient().responses.create({
     model: "gpt-4.1-nano",
     max_output_tokens: 1500,
     text: {
@@ -525,7 +537,7 @@ app.post("/api/ask", requireAuth, async (req, res) => {
       });
     }
 
-    const response = await client.responses.create({
+    const response = await getOpenAiClient().responses.create({
       model: "gpt-4.1-mini",
       max_output_tokens: 900,
       text: {
@@ -613,7 +625,7 @@ app.post("/api/ask/personalized", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "City and interests are required." });
     }
 
-    const response = await client.responses.create({
+    const response = await getOpenAiClient().responses.create({
       model: "gpt-4.1-mini",
       max_output_tokens: 1500,
       text: {
@@ -956,8 +968,12 @@ app.get("/api/countries/:file", (req, res) => {
   });
 });
 
-app.listen(process.env.PORT || 3001, () => {
-  console.log(`API running on http://localhost:${process.env.PORT || 3001}`);
+const port = Number(process.env.PORT || 3001);
+const server = app.listen(port, () => {
+  console.log(`API running on http://localhost:${port}`);
+  setTimeout(() => {
+    if (typeof server?.ref === "function") server.ref();
+  }, 0);
 });
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {

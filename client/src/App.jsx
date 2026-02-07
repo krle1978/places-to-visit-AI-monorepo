@@ -2,7 +2,7 @@ console.log("NEW APP VERSION LOADED");
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API = import.meta.env.VITE_API_URL || window.location.origin;
+const API = import.meta.env.VITE_API_URL;
 
 const countryMap = {
   Albania: "recommendations_Albania_easy.json",
@@ -514,7 +514,7 @@ export default function App() {
       countrySelect.disabled = false;
     }
 
-    const apiBases = [API, "http://localhost:3001"].filter(
+    const apiBases = [API].filter(
       (base, idx, arr) => base && arr.indexOf(base) === idx
     );
 
