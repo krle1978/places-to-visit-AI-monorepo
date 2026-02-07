@@ -501,6 +501,11 @@
   gap: 0.6rem;
 }
 
+.city-search-candidates.city-search-suggestions {
+  display: block;
+  margin-top: 0.2rem;
+}
+
 .city-search-actions .btn {
   width: fit-content;
 }

@@ -78,6 +78,27 @@ function isSafeNextPath(value) {
   return true;
 }
 
+function parseCityQuery(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return { city: "", countryHint: "" };
+
+  const parens = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (parens) {
+    const city = parens[1].trim();
+    const countryHint = parens[2].trim();
+    if (city && countryHint) return { city, countryHint };
+  }
+
+  const commaIndex = raw.indexOf(",");
+  if (commaIndex >= 0) {
+    const city = raw.slice(0, commaIndex).trim();
+    const countryHint = raw.slice(commaIndex + 1).trim();
+    if (city) return { city, countryHint };
+  }
+
+  return { city: raw, countryHint: "" };
+}
+
 export default function App() {
   const [email, setEmail] = useState("");
   const [loginName, setLoginName] = useState("");
@@ -90,6 +111,7 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
   const [isServerReady, setIsServerReady] = useState(false);
+  const [isServerDataReady, setIsServerDataReady] = useState(false);
   const [activeAuthTab, setActiveAuthTab] = useState("login");
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -102,11 +124,16 @@ export default function App() {
   const [signupLoading, setSignupLoading] = useState(false);
   const [missingCity, setMissingCity] = useState("");
   const [missingCityMessage, setMissingCityMessage] = useState("");
+  const [missingCityCandidates, setMissingCityCandidates] = useState([]);
   const [, setMissingCitySuggestion] = useState(null);
   const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
   const [cityGenerateError, setCityGenerateError] = useState("");
   const [aiInterests, setAiInterests] = useState("");
   const [showInterests, setShowInterests] = useState(false);
+
+  useEffect(() => {
+    setMissingCityCandidates([]);
+  }, [missingCity]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -308,6 +335,9 @@ export default function App() {
   useEffect(() => {
 
     const cleanup = [];
+    let cancelled = false;
+
+    setIsServerDataReady(false);
 
     const gpsBtn = document.getElementById("gpsBtn");
     const gpsImg = gpsBtn?.querySelector("img.stateful-btn-image");
@@ -377,8 +407,12 @@ export default function App() {
     const markCountriesReady = () => {
       if (countriesReadyDone) return;
       countriesReadyDone = true;
+      if (!cancelled) setIsServerDataReady(true);
       resolveCountriesReady();
+      if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
     };
+
+    const isPlannerReady = () => isServerReady && countriesReadyDone;
 
     function parseTextBlock(text) {
       if (!text) return "<p>No data available.</p>";
@@ -876,16 +910,19 @@ export default function App() {
       if (!input) return "";
       const aliases = {
         "bosnia and herzegovina": "Bosnia and Herzegowina",
-        "cote d'ivoire": "Cote d'Ivoire",
+        "cote divoire": "Cote d'Ivoire",
         czechia: "Czech Republic",
         "holy see": "Vatican City",
         macedonia: "North Macedonia",
         "north macedonia": "North Macedonia",
         "republic of moldova": "Moldova",
+        russia: "Russia (Europe)",
+        turkey: "Turkey (Europe)",
         "republic of turkey": "Turkey (Europe)",
         "russian federation": "Russia (Europe)",
         "slovak republic": "Slovakia",
         "swiss confederation": "Swizerland",
+        switzerland: "Swizerland",
         turkiye: "Turkey (Europe)",
         "united kingdom of great britain and northern ireland": "United Kingdom"
       };
@@ -896,7 +933,14 @@ export default function App() {
 
       const options = Object.keys(countryFileMap);
       const match = options.find((name) => normalizeName(name) === normalized);
-      return match || "";
+      if (match) return match;
+
+      const partial = options.find((name) => {
+        const option = normalizeName(name);
+        return option && normalized && option.startsWith(normalized);
+      });
+
+      return partial || "";
     }
 
     function resolveCityAlias(cityName, countryName) {
@@ -1007,13 +1051,17 @@ export default function App() {
       return { match: null, suggestion };
     }
 
-    async function findNearestFromCityName(cityQuery) {
+    async function findNearestFromCityName(cityQuery, countryHint = "") {
+      await countriesReady;
+      const hint = String(countryHint || "").trim();
       const geo = await fetchJsonWithFallback(
-        `/api/geo/locate?city=${encodeURIComponent(cityQuery)}`
+        `/api/geo/locate?city=${encodeURIComponent(cityQuery)}${
+          hint ? `&country=${encodeURIComponent(hint)}` : ""
+        }`
       );
       const countryName = findCountryName(geo?.country);
       if (!countryName) {
-        throw new Error("No matching country found.");
+        throw new Error(`No matching country found for "${geo?.country || "unknown"}".`);
       }
 
       const fileName = countryFileMap[countryName];
@@ -1100,7 +1148,7 @@ export default function App() {
     }
 
     async function resolveGeoLocation() {
-      if (!isServerReady) return;
+      if (!isPlannerReady()) return;
       if (!gpsBtn || isGeoLoading) return;
       if (!navigator.geolocation) {
         errorMsg.textContent = "Geolocation is not supported.";
@@ -1157,25 +1205,25 @@ export default function App() {
             errorMsg.textContent = err?.message || "Failed to resolve location.";
           } finally {
             isGeoLoading = false;
-            if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
+            if (gpsImg) gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
           }
         },
         (err) => {
           console.error(err);
           errorMsg.textContent = "Unable to access location.";
           isGeoLoading = false;
-          if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
+          if (gpsImg) gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
         },
         { enableHighAccuracy: false, timeout: 10000 }
       );
     }
 
     if (gpsBtn) {
-      if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
+      if (gpsImg) gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
 
       const onGpsClick = (event) => {
         event.preventDefault();
-        if (!isServerReady) return;
+        if (!isPlannerReady()) return;
         resolveGeoLocation();
       };
 
@@ -1190,8 +1238,8 @@ export default function App() {
       const citySearchImg = citySearchBtn.querySelector("img.stateful-btn-image");
 
       const syncCitySearchBtnState = () => {
-        const raw = citySearchInput.value.trim();
-        const shouldDisable = !isServerReady || isSearchLoading || !raw;
+        const raw = parseCityQuery(citySearchInput.value).city.trim();
+        const shouldDisable = !isPlannerReady() || isSearchLoading || !raw;
         citySearchBtn.disabled = shouldDisable;
         if (citySearchImg) citySearchImg.dataset.locked = shouldDisable ? "true" : "false";
       };
@@ -1315,7 +1363,10 @@ export default function App() {
 
       const onCitySearch = async () => {
         if (isSearchLoading) return;
-        const raw = citySearchInput.value.trim();
+        const parsedQuery = parseCityQuery(citySearchInput.value);
+        const raw = parsedQuery.city;
+        const countryHint = parsedQuery.countryHint;
+        const cityLabel = countryHint ? `${raw}, ${countryHint}` : raw;
         const interestsInput = document.getElementById("city-interests-input");
         const interests = (interestsInput?.value || "").trim();
         clearCitySuggestions();
@@ -1348,7 +1399,7 @@ export default function App() {
         try {
           if (isPremiumPlan && interests) {
             openPlannerPanel();
-            const question = `City: ${raw}\nInterests: ${interests}\nReturn the standard city guide JSON schema with content tailored to these interests.`;
+            const question = `City: ${cityLabel}\nInterests: ${interests}\nReturn the standard city guide JSON schema with content tailored to these interests.`;
             const aiData = await fetchJsonWithFallback("/api/ask", {
               method: "POST",
               headers: {
@@ -1408,7 +1459,8 @@ export default function App() {
               "We don't have that city in our offer. Change your user plan. Showing the nearest city from our offer."
             );
             try {
-              const nearest = await findNearestFromCityName(raw);
+              const preferredCountry = document.getElementById("route-country")?.value?.trim() || "";
+              const nearest = await findNearestFromCityName(raw, countryHint || preferredCountry);
               pendingSelection = {
                 country: nearest.country,
                 city: nearest.city,
@@ -1454,7 +1506,7 @@ export default function App() {
       };
 
       const onCitySearchInput = () => {
-        const raw = citySearchInput.value.trim();
+        const raw = parseCityQuery(citySearchInput.value).city.trim();
         syncCitySearchBtnState();
         if (!raw || raw.length > 10) {
           clearCitySuggestions();
@@ -1672,6 +1724,104 @@ export default function App() {
       }
     };
     window.routePlannerEasy.openPanel = openPlannerPanel;
+    window.routePlannerEasy.findNearestFromCityName = async function (
+      cityQuery,
+      preferredCountryName = ""
+    ) {
+      const raw = String(cityQuery || "").trim();
+      if (!raw) {
+        throw new Error("Please enter a city name.");
+      }
+
+      await countriesReady;
+
+      const preferred = String(preferredCountryName || "").trim();
+      if (preferred && /^[a-z]{2}$/i.test(preferred)) {
+        return await findNearestFromCityName(raw, preferred);
+      }
+
+      const resolvedPreferred = preferred
+        ? countryFileMap[preferred]
+          ? preferred
+          : findCountryName(preferred)
+        : "";
+
+      if (resolvedPreferred) {
+        const geo = await fetchJsonWithFallback(
+          `/api/geo/locate?city=${encodeURIComponent(raw)}&country=${encodeURIComponent(preferred)}`
+        );
+
+        const fileName = countryFileMap[resolvedPreferred];
+        if (!fileName) {
+          throw new Error("No data file for selected country.");
+        }
+
+        const nearest = await fetchJsonWithFallback(
+          `/api/geo/nearest?lat=${encodeURIComponent(
+            geo.lat
+          )}&lon=${encodeURIComponent(geo.lon)}&file=${encodeURIComponent(fileName)}`
+        );
+        const cityName = nearest?.city;
+        if (!cityName) {
+          throw new Error("No nearby city found.");
+        }
+
+        return { country: resolvedPreferred, city: cityName };
+      }
+
+      return await findNearestFromCityName(raw);
+    };
+    window.routePlannerEasy.getGeoCandidates = async function (
+      cityQuery,
+      preferredCountryName = "",
+      limit = 8
+    ) {
+      const raw = String(cityQuery || "").trim();
+      if (!raw) return [];
+      await countriesReady;
+      const preferred = String(preferredCountryName || "").trim();
+      const params = new URLSearchParams();
+      params.set("city", raw);
+      params.set("limit", String(limit));
+      if (preferred) params.set("country", preferred);
+      const data = await fetchJsonWithFallback(`/api/geo/candidates?${params.toString()}`);
+      return Array.isArray(data?.candidates) ? data.candidates : [];
+    };
+    window.routePlannerEasy.findNearestFromGeoCandidate = async function (
+      candidate,
+      preferredCountryName = ""
+    ) {
+      await countriesReady;
+      const lat = Number(candidate?.lat);
+      const lon = Number(candidate?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        throw new Error("Invalid coordinates.");
+      }
+
+      const preferred = String(preferredCountryName || "").trim();
+      const countryRaw = String(candidate?.country || "").trim();
+      const countryName = findCountryName(countryRaw) || (preferred ? preferred : "");
+      if (!countryName) {
+        throw new Error(`No matching country found for "${countryRaw || "unknown"}".`);
+      }
+
+      const fileName = countryFileMap[countryName];
+      if (!fileName) {
+        throw new Error("No data file for selected country.");
+      }
+
+      const nearest = await fetchJsonWithFallback(
+        `/api/geo/nearest?lat=${encodeURIComponent(
+          lat
+        )}&lon=${encodeURIComponent(lon)}&file=${encodeURIComponent(fileName)}`
+      );
+      const cityName = nearest?.city;
+      if (!cityName) {
+        throw new Error("No nearby city found.");
+      }
+
+      return { country: countryName, city: cityName };
+    };
     window.routePlannerEasy.findNearestFromUser = async function () {
       if (!navigator.geolocation) {
         throw new Error("Geolocation is not supported.");
@@ -1717,7 +1867,10 @@ export default function App() {
 
     document.dispatchEvent(new Event("routePlanner:ready"));
 
-    return () => cleanup.forEach((fn) => fn());
+    return () => {
+      cancelled = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, [token, isServerReady]);
 
   useEffect(() => {
@@ -1983,6 +2136,7 @@ export default function App() {
     if (!missingCity || cityGenerateLoading) return;
     setCityGenerateError("");
     setMissingCityMessage(`Generating data for ${missingCity}...`);
+    setMissingCityCandidates([]);
     await generateCityRoute(missingCity);
   };
 
@@ -1990,21 +2144,70 @@ export default function App() {
     if (cityGenerateLoading) return;
     setCityGenerateError("");
     setMissingCityMessage("Finding nearest city...");
+    setMissingCityCandidates([]);
     setCityGenerateLoading(true);
 
     try {
-      if (!window.routePlannerEasy?.findNearestFromUser) {
+      const rawInput =
+        document.getElementById("city-search-input")?.value?.trim() || String(missingCity || "");
+      const parsed = parseCityQuery(rawInput);
+      const raw = parsed.city;
+      const inputCountryHint = parsed.countryHint;
+      const preferredCountry = document.getElementById("route-country")?.value?.trim() || "";
+      const countryHint = inputCountryHint || preferredCountry;
+
+      if (
+        !window.routePlannerEasy?.getGeoCandidates ||
+        !window.routePlannerEasy?.findNearestFromGeoCandidate
+      ) {
         throw new Error("Route planner is not ready yet.");
       }
 
-      const nearest = await window.routePlannerEasy.findNearestFromUser();
-      if (!nearest?.country || !nearest?.city) {
-        throw new Error("No nearby city found.");
+      const candidates = await window.routePlannerEasy.getGeoCandidates(raw, countryHint, 8);
+      if (!candidates.length) {
+        throw new Error("No matching city found.");
       }
 
+      if (candidates.length === 1) {
+        const nearest = await window.routePlannerEasy.findNearestFromGeoCandidate(
+          candidates[0],
+          preferredCountry
+        );
+        window.routePlannerEasy.selectLocation(nearest.country, nearest.city, true);
+        setMissingCity("");
+        setMissingCityMessage("");
+        return;
+      }
+
+      setMissingCityMessage("Select the city you meant:");
+      setMissingCityCandidates(candidates);
+    } catch (err) {
+      setCityGenerateError(err.message || "Failed to find nearest city.");
+    } finally {
+      setCityGenerateLoading(false);
+    }
+  };
+
+  const handleMissingCityCandidateClick = async (candidate) => {
+    if (cityGenerateLoading) return;
+    setCityGenerateError("");
+    setMissingCityMessage("Finding nearest city...");
+    setCityGenerateLoading(true);
+
+    try {
+      const preferredCountry = document.getElementById("route-country")?.value?.trim() || "";
+      if (!window.routePlannerEasy?.findNearestFromGeoCandidate) {
+        throw new Error("Route planner is not ready yet.");
+      }
+
+      const nearest = await window.routePlannerEasy.findNearestFromGeoCandidate(
+        candidate,
+        preferredCountry
+      );
       window.routePlannerEasy.selectLocation(nearest.country, nearest.city, true);
       setMissingCity("");
       setMissingCityMessage("");
+      setMissingCityCandidates([]);
     } catch (err) {
       setCityGenerateError(err.message || "Failed to find nearest city.");
     } finally {
@@ -2389,11 +2592,16 @@ export default function App() {
           <div className="hero-actions">
             <a
               href="locaton.html"
-              className={`image-btn-link${isServerReady ? "" : " is-disabled"}`}
+              className={`image-btn-link${isServerReady && isServerDataReady ? "" : " is-disabled"}`}
               aria-label="I'm Here"
-              aria-disabled={!isServerReady}
-              tabIndex={isServerReady ? undefined : -1}
+              aria-disabled={!(isServerReady && isServerDataReady)}
+              tabIndex={isServerReady && isServerDataReady ? undefined : -1}
               id="gpsBtn"
+              onClick={(event) => {
+                if (isServerReady && isServerDataReady) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
             >
               <img
                 className="stateful-btn-image"
@@ -2432,7 +2640,7 @@ export default function App() {
                 type="text"
                 maxLength={10}
                 placeholder="Type city (max 10)"
-                disabled={!isServerReady}
+                disabled={!(isServerReady && isServerDataReady)}
               />
               <div
                 id="city-search-suggestions"
@@ -2515,6 +2723,32 @@ export default function App() {
                       >
                         {cityGenerateLoading ? "Working..." : "Show nearest city"}
                       </button>
+                      {!!missingCityCandidates.length && (
+                        <div
+                          className="city-search-suggestions city-search-candidates"
+                          role="listbox"
+                          aria-label="Choose a city"
+                        >
+                          <ul className="city-search-suggestions-list">
+                            {missingCityCandidates.map((item, idx) => (
+                              <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
+                                <a
+                                  href="#"
+                                  className="city-search-suggestion"
+                                  title={item?.displayName || ""}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    handleMissingCityCandidateClick(item);
+                                  }}
+                                >
+                                  {(item?.city || "Unknown") +
+                                    (item?.country ? ` (${item.country})` : "")}
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

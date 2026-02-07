@@ -726,6 +726,7 @@ app.get("/api/geo/reverse", async (req, res) => {
 app.get("/api/geo/locate", async (req, res) => {
   try {
     const city = String(req.query.city || "").trim();
+    const countryHint = String(req.query.country || "").trim();
     if (!city) {
       return res.status(400).json({ error: "City is required." });
     }
@@ -733,7 +734,15 @@ app.get("/api/geo/locate", async (req, res) => {
     const url = new URL("https://nominatim.openstreetmap.org/search");
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("limit", "1");
-    url.searchParams.set("city", city);
+    const countryCode = /^[a-z]{2}$/i.test(countryHint) ? countryHint.toLowerCase() : "";
+    if (countryCode) {
+      url.searchParams.set("countrycodes", countryCode);
+      url.searchParams.set("city", city);
+    } else if (countryHint) {
+      url.searchParams.set("q", `${city}, ${countryHint}`);
+    } else {
+      url.searchParams.set("city", city);
+    }
     url.searchParams.set("addressdetails", "1");
 
     const response = await fetch(url, {
@@ -766,6 +775,76 @@ app.get("/api/geo/locate", async (req, res) => {
     }
 
     return res.json({ city: resolvedCity, country, lat, lon });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to resolve location." });
+  }
+});
+
+app.get("/api/geo/candidates", async (req, res) => {
+  try {
+    const city = String(req.query.city || "").trim();
+    const countryHint = String(req.query.country || "").trim();
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.round(limitRaw) : 8;
+    const safeLimit = Math.min(Math.max(limit, 1), 10);
+
+    if (!city) {
+      return res.status(400).json({ error: "City is required." });
+    }
+
+    const url = new URL("https://nominatim.openstreetmap.org/search");
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("limit", safeLimit.toString());
+    url.searchParams.set("addressdetails", "1");
+    const countryCode = /^[a-z]{2}$/i.test(countryHint) ? countryHint.toLowerCase() : "";
+    if (countryCode) {
+      url.searchParams.set("countrycodes", countryCode);
+      url.searchParams.set("city", city);
+    } else if (countryHint) {
+      url.searchParams.set("q", `${city}, ${countryHint}`);
+    } else {
+      url.searchParams.set("city", city);
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "places-to-visit-ai/1.0",
+        "Accept-Language": "en"
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ error: "Failed to resolve location." });
+    }
+
+    const data = await response.json();
+    const candidates = (Array.isArray(data) ? data : [])
+      .map((entry) => {
+        const lat = Number(entry?.lat);
+        const lon = Number(entry?.lon);
+        const address = entry?.address || {};
+        const resolvedCity =
+          address.city ||
+          address.town ||
+          address.village ||
+          address.municipality ||
+          address.county ||
+          entry?.name ||
+          city;
+        const country = address.country || "";
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !country) return null;
+        return {
+          city: resolvedCity,
+          country,
+          lat,
+          lon,
+          displayName: entry?.display_name || `${resolvedCity}, ${country}`
+        };
+      })
+      .filter(Boolean);
+
+    return res.json({ candidates });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to resolve location." });
