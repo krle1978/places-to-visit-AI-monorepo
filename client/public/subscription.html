@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support Us - Donations</title>
+  <link rel="icon" type="image/jpeg" href="/pics/diabetes_logo_1.png">
+  <link rel="stylesheet" href="/styles/subscription.css">
+</head>
+<body>
+
+  <a class="home-btn" href="/">Home</a>
+
+ 
+  <img src="/logo/Places To Visit Logo_02.png" alt="Logo" class="logo-icon">
+  
+ 
+  <!-- Main Donations Section -->
+  <main class="donations">
+
+    <!-- Subscription Plans -->
+    <section class="donation-card monthly-card">
+      <h2>Subscription Plan</h2>
+      <p>Choose the support level that fits you best and unlock more features.</p>
+      <div class="subscription-grid">
+        <article class="plan-card" data-plan="free">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="free" aria-label="Select Free plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Free 0€</h3>
+            <p class="plan-price">0 Tokens</p>
+          </div>
+          <p class="plan-summary">Start with ours own recommandations.</p>
+          <ul class="permissions">
+            <li>Access to Our Tour Data Base recommandation</li>
+          </ul>
+        </article>
+        <article class="plan-card" data-plan="basic">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="basic" aria-label="Select Basic plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Basic 5€</h3>
+            <p class="plan-price">7 Tokens</p>
+          </div>
+          <p class="plan-summary">Support the project and uses queries for cities that are not in our tourist database.</p>
+          <ul class="permissions">
+            <li>Start with ours own recommandations.</li>
+            <li>If a city tour recommendation does not exist in our database, be the first to see a recommendation for the desired city, created with the help of AI.</li>
+          </ul>
+          <div class="plan-cta">
+            <div id="paypal-button-container-5"></div>
+          </div>
+        </article>
+        <article class="plan-card" data-plan="premium">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="premium" aria-label="Select Premium plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Premium 10€</h3>
+            <p class="plan-price">20 Tokens</p>
+          </div>
+          <p class="plan-summary">Unlock deeper insights and personalized guidance.</p>
+          <ul class="permissions">
+            <li>Everything in Free and Basic</li>
+            <li>Download your city tour plan in PDF format.</li>
+            <li>The possibility of creating your unique tour plan with your unique interests.</li>
+          </ul>
+          <div class="plan-cta">
+            <div id="paypal-button-container-10"></div>
+          </div>
+        </article>
+        <article class="plan-card" data-plan="premium_plus">
+          <label class="plan-select">
+            <input type="radio" name="plan" value="premium_plus" aria-label="Select Premium Plus plan">
+            <span class="plan-select-dot"></span>
+          </label>
+          <div class="plan-head">
+            <h3>Premium Plus 20€</h3>
+            <p class="plan-price">50 Tokens</p>
+          </div>
+          <p class="plan-summary">Maximize your impact and shape future features.</p>
+          <ul class="permissions">
+            <li>Everything in Premium</li>
+            <li>50 Tokens for AI queries.</li>
+          </ul>
+          <div class="plan-cta">
+            <div id="paypal-button-container-20"></div>
+          </div>
+        </article>
+      </div>
+      <div class="trust">
+        <img src="/subscription/secure-icon.png" alt="Secure Payment" class="trust-icon">
+        <p>All donations are securely processed.</p>
+      </div>
+    </section>
+
+    <!-- Crypto -->
+    <section class="donation-card">
+      <h2>Crypto</h2>
+      <p>Donate with Bitcoin or Ethereum</p>
+      <div class="crypto">
+        <div>
+          <img src="/crypto/btc-qr.png" alt="BTC QR" class="qr">
+          <p><strong>BTC:</strong> 3PRepewqAmnGW6uqWC3nhJpJVFmKBRdk7u</p> 
+          <button class="copy-btn" data-copy="3PRepewqAmnGW6uqWC3nhJpJVFmKBRdk7u">Copy</button>
+        </div>
+        <div>
+          <img src="/crypto/eth-qr.png" alt="ETH QR" class="qr">
+          <p><strong>ETH:</strong> 0x1bB370570CC46aC9c9aE3d69c6BA15312df75083</p>
+          <button class="copy-btn" data-copy="0x1bB370570CC46aC9c9aE3d69c6BA15312df75083">Copy</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bank Transfer -->
+    <section class="donation-card bank-card">
+      <h2>Bank Transfer (EUR)</h2>
+      <p>You can donate directly via international bank transfer:</p>
+      <ul>
+        <li><strong>Beneficiary:</strong> Rade Krstić</li>
+        <li title="Legal confidentiality – full address not publicly disclosed">
+          <strong>Address:</strong> &lt;street address&gt;, Novi Sad, Serbia
+        </li>
+        <li>
+          <strong>IBAN:</strong> RS35325934170593551847
+          <button class="copy-btn" data-copy="RS35325934170593551847">Copy</button>
+        </li>
+        <li><strong>Bank:</strong> OTP BANKA SRBIJA</li>
+        <li><strong>SWIFT (OTP):</strong> OTPVRS22</li>
+        <li><strong>Intermediary Bank:</strong> Commerzbank AG, Frankfurt am Main</li>
+        <li><strong>SWIFT (Intermediary):</strong> COBADEFF</li>
+      </ul>
+
+      <!-- QR Code sa iznosom 10€ -->
+      <div class="qr-box">
+        <img src="/subscription/bank_transfer_qr_10eur.png" alt="Bank Transfer QR" class="qr" />
+        <p><strong>Scan to donate <span style="color:#e11d48;">10€</span> via SEPA transfer</strong></p>
+        <div id="bank-qr"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <p>🙏 Thank you for supporting us! Together we can make a difference.</p>
+    <p>We are a non-profit project | <a href="mailto:krstic.rade@gmail.com">Contact us</a></p>
+    <p>&copy; 2025 - Rade Krstić, MSc of Information Technology and Systems</p>
+  </footer>
+
+ 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="/subscription.js"></script>
+</body>
+</html>
