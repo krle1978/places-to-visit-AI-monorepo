@@ -19,3 +19,12 @@
 Thumbs.db
 .vscode/
 .idea/
+# env files
+.env
+.env.*
+**/.env
+**/.env.*
+
+# examples (ako ne želiš ni njih)
+.env.example
+**/.env.example
