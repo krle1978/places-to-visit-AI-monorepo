@@ -28,3 +28,7 @@ Thumbs.db
 # examples (ako ne želiš ni njih)
 .env.example
 **/.env.example
+
+# root npm files (monorepo helpers only)
+package.json
+package-lock.json
