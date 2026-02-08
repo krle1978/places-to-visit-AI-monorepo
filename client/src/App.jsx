@@ -1456,29 +1456,9 @@ export default function App() {
 
           if (isFree) {
             setMissingCityMessage(
-              "We don't have that city in our offer. Change your user plan. Showing the nearest city from our offer."
+              "We don't have that city in our offer. Showing the nearest city from our offer."
             );
-            try {
-              const preferredCountry = document.getElementById("route-country")?.value?.trim() || "";
-              const nearest = await findNearestFromCityName(raw, countryHint || preferredCountry);
-              pendingSelection = {
-                country: nearest.country,
-                city: nearest.city,
-                autoSubmit: true
-              };
-
-              openPlannerPanel();
-
-              if (countrySelect.value !== nearest.country) {
-                countrySelect.value = nearest.country;
-                countrySelect.dispatchEvent(new Event("change"));
-              } else {
-                applyPendingCitySelection();
-              }
-            } catch (err) {
-              console.error(err);
-              errorMsg.textContent = err?.message || "Failed to find nearest city.";
-            }
+            handleMissingCityNearest();
             return;
           }
 
@@ -1486,7 +1466,7 @@ export default function App() {
             setMissingCityMessage("City not found. Choose an option below.");
           } else {
             setMissingCityMessage(
-              "This city is not available in our offer. If you want to create it, you need to subscribe to one of the available subscription models."
+              "This city is not available in our offer. You can show the nearest city from our offer, or upgrade your plan to generate it."
             );
           }
         } catch (err) {
@@ -2587,7 +2567,79 @@ export default function App() {
             </div>
           </div>
 
-          <div className="hero-visual" aria-hidden="true"></div>
+          <div className="hero-visual" aria-hidden="true">
+            <span className="hero-marker hero-marker--plaza">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M6.5 7.5h11v11h-11zM9.5 10.5h5v5h-5z"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span className="hero-marker hero-marker--castle">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M6.5 20V10.5l2-1v-2l2 1.2 1.5-1 1.5 1 2-1.2v2l2 1V20M8.5 20v-4h7v4"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="hero-marker hero-marker--church">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 3.5v4M10 5.5h4M7.5 20V11l4.5-3.2L16.5 11v9M10 20v-4h4v4"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="hero-marker hero-marker--monument">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M11 4h2l1 3-1 2v7h2v2H9v-2h2V9l-1-2 1-3zM7 20h10"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="hero-marker hero-marker--food">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M6.5 4.5v7M4.5 4.5v7M8.5 4.5v7M6.5 11.5v8M13.5 7.5c0-2 1.5-3 3-3v15h-3v-12zM19.5 9.5h-3"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="hero-marker hero-marker--museum">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M5 10h14M6.5 10v9M10 10v9M14 10v9M17.5 10v9M4.5 19.5h15M6 9l6-3 6 3"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+          </div>
 
           <div className="hero-actions">
             <a
@@ -2695,7 +2747,7 @@ export default function App() {
                     {missingCityMessage ||
                       (canGenerateCity
                         ? `Generating data for ${missingCity}...`
-                        : "This city is not available in our offer. If you want to create it, you need to subscribe to one of the available subscription models.")}
+                        : "This city is not available in our offer. You can show the nearest city from our offer, or upgrade your plan to generate it.")}
                   </div>
                   {!canGenerateCity && (
                     <button className="btn ghost" type="button" onClick={openSubscriptions}>
@@ -2705,8 +2757,8 @@ export default function App() {
                   {canGenerateCity && cityGenerateError && (
                     <div className="form-error">{cityGenerateError}</div>
                   )}
-                  {canGenerateCity && (
-                    <div className="city-search-actions">
+                  <div className="city-search-actions">
+                    {canGenerateCity && (
                       <button
                         onClick={handleMissingCityMake}
                         disabled={cityGenerateLoading}
@@ -2715,42 +2767,41 @@ export default function App() {
                       >
                         {cityGenerateLoading ? "Working..." : "Generate This City"}
                       </button>
-                      <button
-                        onClick={handleMissingCityNearest}
-                        disabled={cityGenerateLoading}
-                        className="btn ghost"
-                        type="button"
+                    )}
+                    <button
+                      onClick={handleMissingCityNearest}
+                      disabled={cityGenerateLoading || !(isServerReady && isServerDataReady)}
+                      className="btn ghost btn-empty-image"
+                      type="button"
+                    >
+                      {cityGenerateLoading ? "Working..." : "Show nearest city"}
+                    </button>
+                    {!!missingCityCandidates.length && (
+                      <div
+                        className="city-search-suggestions city-search-candidates"
+                        role="listbox"
+                        aria-label="Choose a city"
                       >
-                        {cityGenerateLoading ? "Working..." : "Show nearest city"}
-                      </button>
-                      {!!missingCityCandidates.length && (
-                        <div
-                          className="city-search-suggestions city-search-candidates"
-                          role="listbox"
-                          aria-label="Choose a city"
-                        >
-                          <ul className="city-search-suggestions-list">
-                            {missingCityCandidates.map((item, idx) => (
-                              <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
-                                <a
-                                  href="#"
-                                  className="city-search-suggestion"
-                                  title={item?.displayName || ""}
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    handleMissingCityCandidateClick(item);
-                                  }}
-                                >
-                                  {(item?.city || "Unknown") +
-                                    (item?.country ? ` (${item.country})` : "")}
-                                </a>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        <ul className="city-search-suggestions-list">
+                          {missingCityCandidates.map((item, idx) => (
+                            <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
+                              <a
+                                href="#"
+                                className="city-search-suggestion"
+                                title={item?.displayName || ""}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  handleMissingCityCandidateClick(item);
+                                }}
+                              >
+                                {(item?.city || "Unknown") + (item?.country ? ` (${item.country})` : "")}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
