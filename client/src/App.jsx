@@ -2455,6 +2455,11 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {!isServerReady && (
+        <div className="connecting-overlay" role="status" aria-live="polite">
+          <div className="connecting-card">Connecting</div>
+        </div>
+      )}
       <header className="site-header" data-include="/components/header.html">
         <div className="header-title">
           <img
