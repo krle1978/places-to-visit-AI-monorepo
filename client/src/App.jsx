@@ -339,7 +339,7 @@ export default function App() {
 
     setIsServerDataReady(false);
 
-    const gpsBtn = document.getElementById("gpsBtn");
+    const gpsBtn = document.getElementById("gpsBtn") || document.getElementById("heroGpsBtn");
     const gpsImg = gpsBtn?.querySelector("img.stateful-btn-image");
     const citySearchInput = document.getElementById("city-search-input");
     const citySearchBtn = document.getElementById("city-search-btn");
@@ -409,7 +409,11 @@ export default function App() {
       countriesReadyDone = true;
       if (!cancelled) setIsServerDataReady(true);
       resolveCountriesReady();
-      if (gpsImg) gpsImg.dataset.locked = isServerReady ? "false" : "true";
+      if (gpsImg) {
+        gpsImg.dataset.locked = isServerReady ? "false" : "true";
+      } else if (gpsBtn) {
+        gpsBtn.dataset.locked = isServerReady ? "false" : "true";
+      }
     };
 
     const isPlannerReady = () => isServerReady && countriesReadyDone;
@@ -1158,7 +1162,11 @@ export default function App() {
       openPlannerPanel();
       errorMsg.textContent = "";
       isGeoLoading = true;
-      if (gpsImg) gpsImg.dataset.locked = "true";
+      if (gpsImg) {
+        gpsImg.dataset.locked = "true";
+      } else if (gpsBtn) {
+        gpsBtn.dataset.locked = "true";
+      }
 
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -1205,30 +1213,45 @@ export default function App() {
             errorMsg.textContent = err?.message || "Failed to resolve location.";
           } finally {
             isGeoLoading = false;
-            if (gpsImg) gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
+            if (gpsImg) {
+              gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
+            } else if (gpsBtn) {
+              gpsBtn.dataset.locked = isPlannerReady() ? "false" : "true";
+            }
           }
         },
         (err) => {
           console.error(err);
           errorMsg.textContent = "Unable to access location.";
           isGeoLoading = false;
-          if (gpsImg) gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
+          if (gpsImg) {
+            gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
+          } else if (gpsBtn) {
+            gpsBtn.dataset.locked = isPlannerReady() ? "false" : "true";
+          }
         },
         { enableHighAccuracy: false, timeout: 10000 }
       );
     }
 
     if (gpsBtn) {
-      if (gpsImg) gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
+      if (gpsImg) {
+        gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
+      } else {
+        gpsBtn.dataset.locked = isPlannerReady() ? "false" : "true";
+      }
 
-      const onGpsClick = (event) => {
+      const onGpsActivate = (event) => {
+        if (event.type === "keydown" && !["Enter", " "].includes(event.key)) return;
         event.preventDefault();
         if (!isPlannerReady()) return;
         resolveGeoLocation();
       };
 
-      gpsBtn.addEventListener("click", onGpsClick);
-      cleanup.push(() => gpsBtn.removeEventListener("click", onGpsClick));
+      gpsBtn.addEventListener("click", onGpsActivate);
+      gpsBtn.addEventListener("keydown", onGpsActivate);
+      cleanup.push(() => gpsBtn.removeEventListener("click", onGpsActivate));
+      cleanup.push(() => gpsBtn.removeEventListener("keydown", onGpsActivate));
     }
 
     if (citySearchInput && citySearchBtn) {
@@ -2568,6 +2591,32 @@ export default function App() {
           </div>
 
           <div className="hero-visual" aria-hidden="true">
+            <button
+              id="heroGpsBtn"
+              className="hero-visual-gps"
+              type="button"
+              aria-label="Explore My location"
+              disabled={!(isServerReady && isServerDataReady)}
+            >
+              <span className="hero-visual-gps-label">Explore My location!</span>
+              <span className="hero-visual-gps-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M10.8 2.8c-.9 0-1.6.7-1.6 1.6V12l-1-.7c-.8-.6-2-.5-2.7.2-.8.8-.8 2-.2 2.8l2.6 3.4c.6.8 1.6 1.3 2.6 1.3h3.1c1.8 0 3.3-1.3 3.6-3.1l.8-4.6c.2-1.4-.9-2.7-2.3-2.7h-3.2V4.4c0-.9-.7-1.6-1.6-1.6-.9 0-1.6.7-1.6 1.6v1.2"
+                    fill="currentColor"
+                    opacity="0.96"
+                  />
+                  <path
+                    d="M10.8 2.8c-.9 0-1.6.7-1.6 1.6V12l-1-.7c-.8-.6-2-.5-2.7.2-.8.8-.8 2-.2 2.8l2.6 3.4c.6.8 1.6 1.3 2.6 1.3h3.1c1.8 0 3.3-1.3 3.6-3.1l.8-4.6c.2-1.4-.9-2.7-2.3-2.7h-3.2V4.4c0-.9-.7-1.6-1.6-1.6-.9 0-1.6.7-1.6 1.6v1.2"
+                    stroke="rgba(0,0,0,0.25)"
+                    fill="none"
+                    strokeWidth="0.6"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+            </button>
             <span className="hero-marker hero-marker--plaza">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -2642,29 +2691,6 @@ export default function App() {
           </div>
 
           <div className="hero-actions">
-            <a
-              href="locaton.html"
-              className={`image-btn-link${isServerReady && isServerDataReady ? "" : " is-disabled"}`}
-              aria-label="I'm Here"
-              aria-disabled={!(isServerReady && isServerDataReady)}
-              tabIndex={isServerReady && isServerDataReady ? undefined : -1}
-              id="gpsBtn"
-              onClick={(event) => {
-                if (isServerReady && isServerDataReady) return;
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-            >
-              <img
-                className="stateful-btn-image"
-                src="/buttons/IM_Here/btn_imhere_original.png"
-                alt="I'm Here"
-                data-default="/buttons/IM_Here/btn_imhere_original.png"
-                data-hover="/buttons/IM_Here/btn_imhere_hover.png"
-                data-active="/buttons/IM_Here/btn_imhere_click.png"
-              />
-            </a>
-
             {typeof tokenCount === "number" && (
               <div className="token-panel" aria-label={`Tokens: ${tokenCount}`}>
                 <div className="token-count">Tokens: {tokenCount}</div>
