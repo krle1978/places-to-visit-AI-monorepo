@@ -27,6 +27,33 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  max-width: min(720px, calc(100vw - 3rem));
+  text-align: center;
+}
+
+.connecting-title {
+  font-size: clamp(0.95rem, 1.2vw, 1.05rem);
+}
+
+.connecting-tip {
+  margin-top: 0.85rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-weight: 600;
+  color: rgba(15, 30, 26, 0.86);
+  line-height: 1.55;
+  animation: connectingTipFade 220ms ease-out;
+}
+
+@keyframes connectingTipFade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .site-header,

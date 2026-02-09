@@ -4,6 +4,19 @@ import "./App.css";
 
 const API = import.meta.env.VITE_API_URL;
 
+const CONNECTING_TIPS = [
+  "On mobile, tap “Explore My location!” and allow location access to discover nearby cities.",
+  "Create an account to start your plan and unlock benefits with Basic and Premium.",
+  "Use the city search box to quickly find a city—try “Paris” or “Paris, France”.",
+  "Use the suggestions under the search box to avoid typos and get better matches.",
+  "Switch countries in the planner to explore different destinations and route ideas.",
+  "Save your route as a PDF so you can access it offline while traveling.",
+  "Premium helps you generate richer itineraries—upgrade anytime from your account menu.",
+  "If a city name is missing, try adding the country in parentheses, e.g. “Nice (France)”.",
+  "Keep your query simple first (city only), then refine with details if needed.",
+  "Tip: try different seasons in the itinerary to see what’s best for your trip."
+];
+
 const countryMap = {
   Albania: "recommendations_Albania_easy.json",
   Andorra: "recommendations_Andorra_easy.json",
@@ -112,6 +125,7 @@ export default function App() {
   const [plan, setPlan] = useState(getPlanFromToken(localStorage.getItem("token")));
   const [isServerReady, setIsServerReady] = useState(false);
   const [isServerDataReady, setIsServerDataReady] = useState(false);
+  const [connectingTipIndex, setConnectingTipIndex] = useState(0);
   const [activeAuthTab, setActiveAuthTab] = useState("login");
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -134,6 +148,16 @@ export default function App() {
   useEffect(() => {
     setMissingCityCandidates([]);
   }, [missingCity]);
+
+  useEffect(() => {
+    if (isServerReady) return;
+
+    const intervalId = window.setInterval(() => {
+      setConnectingTipIndex((prev) => (prev + 1) % CONNECTING_TIPS.length);
+    }, 6000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isServerReady]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2457,7 +2481,12 @@ export default function App() {
     <div className="app-shell">
       {!isServerReady && (
         <div className="connecting-overlay" role="status" aria-live="polite">
-          <div className="connecting-card">Connecting</div>
+          <div className="connecting-card">
+            <div className="connecting-title">Loading data…</div>
+            <div className="connecting-tip" key={connectingTipIndex}>
+              {CONNECTING_TIPS[connectingTipIndex]}
+            </div>
+          </div>
         </div>
       )}
       <header className="site-header" data-include="/components/header.html">
