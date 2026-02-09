@@ -52,6 +52,13 @@ const COUNTRIES_DIR = path.join(DATA_DIR, "countries");
 const USERS_PATH = path.join(DATA_DIR, "users.json");
 const PENDING_USERS_PATH = path.join(DATA_DIR, "pending_users.json");
 const cityGeoCache = new Map();
+const CITY_GEO_CACHE_PATH = path.join(DATA_DIR, "city_geo_cache.json");
+let cityGeoCacheLoaded = false;
+let cityGeoCacheWriteTimer = null;
+let offerCityIndex = null;
+let offerCityIndexPromise = null;
+let supportedCountryKeys = null;
+let supportedCountryKeysPromise = null;
 const smtpPort = Number(process.env.SMTP_PORT || 587);
 const mailTransport = process.env.SMTP_HOST
   ? nodemailer.createTransport({
@@ -83,6 +90,243 @@ function normalizeKey(value) {
   return normalizeName(value).replace(/\s+/g, "");
 }
 
+function stripParenthetical(value) {
+  return String(value || "")
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildCityGeoKey(city, country) {
+  const cityKey = normalizeName(String(city || "").trim());
+  const countryKey = normalizeName(stripParenthetical(country));
+  return `${cityKey}|${countryKey}`;
+}
+
+async function loadCityGeoCacheFromDisk() {
+  if (cityGeoCacheLoaded) return;
+  cityGeoCacheLoaded = true;
+
+  try {
+    const raw = await fs.promises.readFile(CITY_GEO_CACHE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return;
+
+    for (const [key, coords] of Object.entries(parsed)) {
+      const lat = Number(coords?.lat);
+      const lon = Number(coords?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      cityGeoCache.set(key, { lat, lon });
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("Failed to load city geo cache.", err);
+    }
+  }
+}
+
+function scheduleCityGeoCacheWrite() {
+  if (cityGeoCacheWriteTimer) return;
+  cityGeoCacheWriteTimer = setTimeout(async () => {
+    cityGeoCacheWriteTimer = null;
+    try {
+      const obj = Object.create(null);
+      for (const [key, coords] of cityGeoCache.entries()) {
+        const lat = Number(coords?.lat);
+        const lon = Number(coords?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        obj[key] = { lat, lon };
+      }
+      await fs.promises.writeFile(CITY_GEO_CACHE_PATH, JSON.stringify(obj, null, 2), "utf8");
+    } catch (err) {
+      console.error("Failed to write city geo cache.", err);
+    }
+  }, 1200);
+}
+
+async function fetchJson(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "places-to-visit-ai/1.0",
+        "Accept-Language": "en"
+      }
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    if (err?.name === "AbortError") return null;
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function geocodeCityViaOpenMeteo(city, country) {
+  const query = country ? `${city}, ${stripParenthetical(country)}` : city;
+  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+  url.searchParams.set("name", query);
+  url.searchParams.set("count", "5");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("format", "json");
+  const data = await fetchJson(url);
+  const results = Array.isArray(data?.results) ? data.results : [];
+  if (!results.length) return null;
+
+  const expectedCountry = normalizeKey(stripParenthetical(country));
+  const best = expectedCountry
+    ? results.find((item) => normalizeKey(stripParenthetical(item?.country)) === expectedCountry) ||
+      results[0]
+    : results[0];
+
+  const lat = Number(best?.latitude);
+  const lon = Number(best?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
+}
+
+async function geocodeCityViaNominatim(city, country) {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "1");
+  if (country) {
+    url.searchParams.set("q", `${city}, ${stripParenthetical(country)}`);
+  } else {
+    url.searchParams.set("city", city);
+  }
+
+  const data = await fetchJson(url);
+  if (!Array.isArray(data) || !data[0]) return null;
+
+  const result = {
+    lat: Number(data[0].lat),
+    lon: Number(data[0].lon)
+  };
+
+  if (!Number.isFinite(result.lat) || !Number.isFinite(result.lon)) {
+    return null;
+  }
+
+  return result;
+}
+
+async function geocodeCity(city, country) {
+  await loadCityGeoCacheFromDisk();
+  const key = buildCityGeoKey(city, country);
+  if (cityGeoCache.has(key)) return cityGeoCache.get(key);
+
+  const trimmedCity = String(city || "").trim();
+  if (!trimmedCity) return null;
+
+  const viaOpenMeteo = await geocodeCityViaOpenMeteo(trimmedCity, country);
+  const coords = viaOpenMeteo || (await geocodeCityViaNominatim(trimmedCity, country));
+  if (!coords) return null;
+
+  cityGeoCache.set(key, coords);
+  scheduleCityGeoCacheWrite();
+  return coords;
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = Array(items.length);
+  let index = 0;
+
+  const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
+    while (index < items.length) {
+      const current = index++;
+      try {
+        results[current] = await mapper(items[current], current);
+      } catch (err) {
+        results[current] = null;
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+async function getSupportedCountryKeys() {
+  if (supportedCountryKeys) return supportedCountryKeys;
+  if (supportedCountryKeysPromise) return supportedCountryKeysPromise;
+
+  supportedCountryKeysPromise = (async () => {
+    const keys = new Set();
+    const files = await fs.promises.readdir(COUNTRIES_DIR);
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const raw = await fs.promises.readFile(path.join(COUNTRIES_DIR, file), "utf8");
+        const parsed = JSON.parse(raw);
+        const name = String(parsed?.name || "").trim();
+        if (!name) continue;
+        keys.add(normalizeKey(name));
+        const base = stripParenthetical(name);
+        if (base) keys.add(normalizeKey(base));
+      } catch (err) {
+        console.error(`Failed to load country file for supported list: ${file}`);
+      }
+    }
+    supportedCountryKeys = keys;
+    supportedCountryKeysPromise = null;
+    return keys;
+  })();
+
+  return supportedCountryKeysPromise;
+}
+
+async function buildOfferCityIndex() {
+  await loadCityGeoCacheFromDisk();
+  const files = (await fs.promises.readdir(COUNTRIES_DIR)).filter((file) => file.endsWith(".json"));
+
+  const tasks = [];
+  for (const file of files) {
+    try {
+      const raw = await fs.promises.readFile(path.join(COUNTRIES_DIR, file), "utf8");
+      const parsed = JSON.parse(raw);
+      const countryName = String(parsed?.name || "").trim();
+      const countryForGeo = stripParenthetical(countryName);
+      const cities = Array.isArray(parsed?.cities) ? parsed.cities : [];
+      for (const city of cities) {
+        const cityName = String(city?.name || "").trim();
+        if (!cityName) continue;
+        tasks.push({ file, countryForGeo, cityName });
+      }
+    } catch (err) {
+      console.error(`Failed to read country file: ${file}`, err);
+    }
+  }
+
+  const resolved = await mapWithConcurrency(tasks, 8, async (task) => {
+    const coords = await geocodeCity(task.cityName, task.countryForGeo);
+    if (!coords) return null;
+    return { file: task.file, city: task.cityName, lat: coords.lat, lon: coords.lon };
+  });
+
+  return resolved.filter(Boolean);
+}
+
+async function getOfferCityIndex() {
+  if (offerCityIndex) return offerCityIndex;
+  if (offerCityIndexPromise) return offerCityIndexPromise;
+
+  offerCityIndexPromise = buildOfferCityIndex()
+    .then((index) => {
+      offerCityIndex = index;
+      offerCityIndexPromise = null;
+      return index;
+    })
+    .catch((err) => {
+      offerCityIndexPromise = null;
+      throw err;
+    });
+
+  return offerCityIndexPromise;
+}
+
 async function cityExistsInFile(fileName, cityName) {
   const resolved = resolveCountryFile(fileName);
   if (resolved.error) return null;
@@ -105,11 +349,69 @@ const COUNTRY_ALIASES = {
   "republicofmoldova": "Moldova",
   "republicofturkey": "Turkey (Europe)",
   "russianfederation": "Russia (Europe)",
+  "russia": "Russia (Europe)",
   "slovakrepublic": "Slovakia",
   "swissconfederation": "Swizerland",
   "turkiye": "Turkey (Europe)",
+  "turkey": "Turkey (Europe)",
   "unitedkingdomofgreatbritainandnorthernireland": "United Kingdom"
 };
+
+const EUROPE_COUNTRY_KEYS = new Set(
+  [
+    "Albania",
+    "Andorra",
+    "Armenia",
+    "Austria",
+    "Azerbaijan",
+    "Belarus",
+    "Belgium",
+    "Bosnia and Herzegovina",
+    "Bosnia and Herzegowina",
+    "Bulgaria",
+    "Croatia",
+    "Cyprus",
+    "Czech Republic",
+    "Denmark",
+    "Estonia",
+    "Finland",
+    "France",
+    "Georgia",
+    "Germany",
+    "Greece",
+    "Hungary",
+    "Iceland",
+    "Ireland",
+    "Italy",
+    "Kosovo",
+    "Latvia",
+    "Liechtenstein",
+    "Lithuania",
+    "Luxembourg",
+    "Malta",
+    "Moldova",
+    "Monaco",
+    "Montenegro",
+    "Netherlands",
+    "North Macedonia",
+    "Norway",
+    "Poland",
+    "Portugal",
+    "Romania",
+    "Russia",
+    "San Marino",
+    "Serbia",
+    "Slovakia",
+    "Slovenia",
+    "Spain",
+    "Sweden",
+    "Switzerland",
+    "Turkey",
+    "Ukraine",
+    "United Kingdom",
+    "Vatican City"
+  ].map((name) => normalizeKey(name))
+);
 
 function resolveCountryAlias(input) {
   const key = normalizeKey(input);
@@ -347,40 +649,6 @@ Rules: interests is an object; use Google Maps search URLs; keep descriptions co
   await fs.promises.writeFile(resolved.path, JSON.stringify(parsed, null, 2), "utf8");
 
   return { created: true, city: cityJSON.name, country: parsed.name, file: fileName };
-}
-
-async function geocodeCity(city, country) {
-  const key = `${city}|${country || ""}`;
-  if (cityGeoCache.has(key)) return cityGeoCache.get(key);
-
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("city", city);
-  if (country) url.searchParams.set("country", country);
-
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "places-to-visit-ai/1.0",
-      "Accept-Language": "en"
-    }
-  });
-
-  if (!response.ok) return null;
-  const data = await response.json();
-  if (!Array.isArray(data) || !data[0]) return null;
-
-  const result = {
-    lat: Number(data[0].lat),
-    lon: Number(data[0].lon)
-  };
-
-  if (!Number.isFinite(result.lat) || !Number.isFinite(result.lon)) {
-    return null;
-  }
-
-  cityGeoCache.set(key, result);
-  return result;
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -844,7 +1112,18 @@ app.get("/api/geo/candidates", async (req, res) => {
       })
       .filter(Boolean);
 
-    return res.json({ candidates });
+    const filtered = candidates.filter((candidate) => {
+      const countryName = resolveCountryAlias(candidate.country);
+      const countryKey = normalizeKey(stripParenthetical(countryName));
+      if (!EUROPE_COUNTRY_KEYS.has(countryKey)) return false;
+
+      if (countryKey === "turkey" && Number(candidate.lon) > 30.5) return false;
+      if (countryKey === "russia" && Number(candidate.lon) > 60) return false;
+
+      return true;
+    });
+
+    return res.json({ candidates: filtered });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to resolve location." });
@@ -855,43 +1134,42 @@ app.get("/api/geo/nearest", async (req, res) => {
   try {
     const lat = Number(req.query.lat);
     const lon = Number(req.query.lon);
-    const fileName = req.query.file;
+    const fileName = String(req.query.file || "").trim();
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return res.status(400).json({ error: "Invalid coordinates." });
     }
 
-    const resolved = resolveCountryFile(fileName);
-    if (resolved.error) {
-      return res.status(400).json({ error: resolved.error });
-    }
-
-    const raw = await fs.promises.readFile(resolved.path, "utf8");
-    const parsed = JSON.parse(raw);
-    const cities = Array.isArray(parsed?.cities) ? parsed.cities : [];
-
-    let bestCity = null;
-    let bestDistance = Infinity;
-
-    for (const city of cities) {
-      const name = city?.name;
-      if (!name) continue;
-
-      const coords = await geocodeCity(name, parsed?.name);
-      if (!coords) continue;
-
-      const dist = haversineKm(lat, lon, coords.lat, coords.lon);
-      if (dist < bestDistance) {
-        bestDistance = dist;
-        bestCity = name;
+    if (fileName) {
+      const resolved = resolveCountryFile(fileName);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
       }
     }
 
-    if (!bestCity) {
+    const index = await getOfferCityIndex();
+    const candidates = fileName ? index.filter((entry) => entry.file === fileName) : index;
+
+    if (!candidates.length) {
       return res.status(404).json({ error: "No nearby city found." });
     }
 
-    return res.json({ city: bestCity });
+    let best = null;
+    let bestDistance = Infinity;
+
+    for (const entry of candidates) {
+      const dist = haversineKm(lat, lon, entry.lat, entry.lon);
+      if (dist < bestDistance) {
+        bestDistance = dist;
+        best = entry;
+      }
+    }
+
+    if (!best?.city) {
+      return res.status(404).json({ error: "No nearby city found." });
+    }
+
+    return res.json({ city: best.city, file: best.file, distanceKm: bestDistance });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to find nearest city." });
@@ -1057,6 +1335,12 @@ if (!process.env.VERCEL && isEntrypoint) {
     setTimeout(() => {
       if (typeof server?.ref === "function") server.ref();
     }, 0);
+
+    setTimeout(() => {
+      getOfferCityIndex()
+        .then((index) => console.log(`✅ Geo index ready (${index.length} cities).`))
+        .catch((err) => console.error("Geo index build failed.", err));
+    }, 300);
   });
 }
 

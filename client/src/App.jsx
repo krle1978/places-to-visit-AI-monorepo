@@ -1112,27 +1112,25 @@ export default function App() {
           hint ? `&country=${encodeURIComponent(hint)}` : ""
         }`
       );
-      const countryName = findCountryName(geo?.country);
-      if (!countryName) {
-        throw new Error(`No matching country found for "${geo?.country || "unknown"}".`);
-      }
-
-      const fileName = countryFileMap[countryName];
-      if (!fileName) {
-        throw new Error("No data file for selected country.");
-      }
-
+      const countryName = findCountryName(geo?.country) || "";
       const nearest = await fetchJsonWithFallback(
-        `/api/geo/nearest?lat=${encodeURIComponent(
-          geo.lat
-        )}&lon=${encodeURIComponent(geo.lon)}&file=${encodeURIComponent(fileName)}`
+        `/api/geo/nearest?lat=${encodeURIComponent(geo.lat)}&lon=${encodeURIComponent(geo.lon)}`
       );
       const cityName = nearest?.city;
       if (!cityName) {
         throw new Error("No nearby city found.");
       }
 
-      return { country: countryName, city: cityName };
+      const nearestCountry =
+        (nearest?.file &&
+          Object.entries(countryFileMap).find(([, file]) => file === nearest.file)?.[0]) ||
+        countryName;
+
+      if (!nearestCountry) {
+        throw new Error("No matching country found.");
+      }
+
+      return { country: nearestCountry, city: cityName };
     }
 
     async function applyPendingCitySelection() {
@@ -1803,22 +1801,20 @@ export default function App() {
           `/api/geo/locate?city=${encodeURIComponent(raw)}&country=${encodeURIComponent(preferred)}`
         );
 
-        const fileName = countryFileMap[resolvedPreferred];
-        if (!fileName) {
-          throw new Error("No data file for selected country.");
-        }
-
         const nearest = await fetchJsonWithFallback(
-          `/api/geo/nearest?lat=${encodeURIComponent(
-            geo.lat
-          )}&lon=${encodeURIComponent(geo.lon)}&file=${encodeURIComponent(fileName)}`
+          `/api/geo/nearest?lat=${encodeURIComponent(geo.lat)}&lon=${encodeURIComponent(geo.lon)}`
         );
         const cityName = nearest?.city;
         if (!cityName) {
           throw new Error("No nearby city found.");
         }
 
-        return { country: resolvedPreferred, city: cityName };
+        const nearestCountry =
+          (nearest?.file &&
+            Object.entries(countryFileMap).find(([, file]) => file === nearest.file)?.[0]) ||
+          resolvedPreferred;
+
+        return { country: nearestCountry, city: cityName };
       }
 
       return await findNearestFromCityName(raw);
@@ -1850,29 +1846,26 @@ export default function App() {
         throw new Error("Invalid coordinates.");
       }
 
-      const preferred = String(preferredCountryName || "").trim();
-      const countryRaw = String(candidate?.country || "").trim();
-      const countryName = findCountryName(countryRaw) || (preferred ? preferred : "");
-      if (!countryName) {
-        throw new Error(`No matching country found for "${countryRaw || "unknown"}".`);
-      }
-
-      const fileName = countryFileMap[countryName];
-      if (!fileName) {
-        throw new Error("No data file for selected country.");
-      }
-
       const nearest = await fetchJsonWithFallback(
-        `/api/geo/nearest?lat=${encodeURIComponent(
-          lat
-        )}&lon=${encodeURIComponent(lon)}&file=${encodeURIComponent(fileName)}`
+        `/api/geo/nearest?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`
       );
       const cityName = nearest?.city;
       if (!cityName) {
         throw new Error("No nearby city found.");
       }
 
-      return { country: countryName, city: cityName };
+      const nearestCountry =
+        (nearest?.file &&
+          Object.entries(countryFileMap).find(([, file]) => file === nearest.file)?.[0]) ||
+        findCountryName(nearest?.country) ||
+        findCountryName(preferredCountryName) ||
+        String(preferredCountryName || "").trim();
+
+      if (!nearestCountry) {
+        throw new Error("No matching country found.");
+      }
+
+      return { country: nearestCountry, city: cityName };
     };
     window.routePlannerEasy.findNearestFromUser = async function () {
       if (!navigator.geolocation) {
@@ -2234,7 +2227,9 @@ export default function App() {
       setMissingCityMessage("Select the city you meant:");
       setMissingCityCandidates(candidates);
     } catch (err) {
-      setCityGenerateError(err.message || "Failed to find nearest city.");
+      const message = err?.message || "Failed to find nearest city.";
+      setCityGenerateError(message);
+      setMissingCityMessage(message);
     } finally {
       setCityGenerateLoading(false);
     }
@@ -2261,7 +2256,9 @@ export default function App() {
       setMissingCityMessage("");
       setMissingCityCandidates([]);
     } catch (err) {
-      setCityGenerateError(err.message || "Failed to find nearest city.");
+      const message = err?.message || "Failed to find nearest city.";
+      setCityGenerateError(message);
+      setMissingCityMessage(message);
     } finally {
       setCityGenerateLoading(false);
     }
