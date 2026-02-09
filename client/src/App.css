@@ -1570,11 +1570,36 @@
     min-height: 520px;
     aspect-ratio: 2 / 3;
     background-image: url("/backgrounds/hero-citypath-mobile.webp");
+    width: calc(100% - (2.5rem + env(safe-area-inset-left) + env(safe-area-inset-right)));
+    margin-inline: auto;
     background-position: center;
   }
 
   .hero-visual-gps {
     display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+  }
+
+  .hero-visual-gps-label {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    margin: 0;
+    width: auto;
+    max-width: calc(100% - 2.5rem);
+    text-align: center;
+  }
+
+  .hero-visual-gps-icon {
+    position: static;
+    left: auto;
+    top: auto;
+    transform: none;
   }
 
   .hero-marker--plaza {
