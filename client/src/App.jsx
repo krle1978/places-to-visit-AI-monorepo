@@ -126,11 +126,13 @@ export default function App() {
   const [isServerReady, setIsServerReady] = useState(false);
   const [isServerDataReady, setIsServerDataReady] = useState(false);
   const [connectingTipIndex, setConnectingTipIndex] = useState(0);
+  const [showLoadingTipsModal, setShowLoadingTipsModal] = useState(false);
   const [activeAuthTab, setActiveAuthTab] = useState("login");
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [authNext, setAuthNext] = useState(null);
   const signupInFlightRef = useRef(false);
+  const loadingTipsCloseBtnRef = useRef(null);
 
   const [error, setError] = useState("");
   const [signupMessage, setSignupMessage] = useState("");
@@ -158,6 +160,29 @@ export default function App() {
 
     return () => window.clearInterval(intervalId);
   }, [isServerReady]);
+
+  useEffect(() => {
+    if (!showLoadingTipsModal) return;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setShowLoadingTipsModal(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    window.setTimeout(() => {
+      loadingTipsCloseBtnRef.current?.focus();
+    }, 0);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showLoadingTipsModal]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2479,6 +2504,42 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {showLoadingTipsModal && (
+        <div
+          className="tips-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowLoadingTipsModal(false);
+            }
+          }}
+        >
+          <div className="tips-modal" role="dialog" aria-modal="true" aria-labelledby="tips-modal-title">
+            <div className="tips-modal-header">
+              <h2 id="tips-modal-title">Loading tips</h2>
+              <button
+                ref={loadingTipsCloseBtnRef}
+                type="button"
+                className="tips-modal-close"
+                onClick={() => setShowLoadingTipsModal(false)}
+                aria-label="Close tips"
+              >
+                ×
+              </button>
+            </div>
+            <p className="tips-modal-subtitle">
+              These are all tips that can appear while the app is waiting for the backend to load.
+            </p>
+            <div className="tips-modal-body">
+              <ul className="tips-modal-list">
+                {CONNECTING_TIPS.map((tip, index) => (
+                  <li key={tip || index}>{tip}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
       {!isServerReady && (
         <div className="connecting-overlay" role="status" aria-live="polite">
           <div className="connecting-card">
@@ -2616,7 +2677,7 @@ export default function App() {
                 type="button"
                 className="hero-cta hero-cta-secondary"
                 onClick={() => {
-                  window.location.href = "/about.html";
+                  setShowLoadingTipsModal(true);
                 }}
               >
                 Discover How It Works
