@@ -1,5 +1,6 @@
 document.addEventListener("DOMContentLoaded", () => {
   const nameEl = document.getElementById("profile-name");
+  const emojiEl = document.getElementById("profile-emoji");
   const emailEl = document.getElementById("profile-email");
   const planEl = document.getElementById("profile-plan");
   const tokensEl = document.getElementById("profile-tokens");
@@ -9,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const planLabels = {
     free: "Free",
+    trial: "Trial",
     basic: "Basic",
     premium: "Premium",
     premium_plus: "Premium Plus"
@@ -45,6 +47,9 @@ document.addEventListener("DOMContentLoaded", () => {
       emailEl.textContent = data.email || "-";
       planEl.textContent = planLabels[planKey] || "Free";
       tokensEl.textContent = Number.isFinite(data.tokens) ? String(data.tokens) : "0";
+      if (emojiEl) {
+        emojiEl.hidden = planKey !== "trial";
+      }
     })
     .catch((err) => {
       errorEl.textContent = err.message || "Failed to load profile.";

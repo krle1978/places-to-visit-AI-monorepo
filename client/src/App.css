@@ -294,6 +294,17 @@
   gap: 0.4rem;
 }
 
+.header-user-name {
+  font-weight: 700;
+  color: #2b241c;
+}
+
+.user-emoji {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+}
+
 .plan-badge {
   display: inline-flex;
   align-items: center;
@@ -330,6 +341,12 @@
   color: #8a5b00;
   background: #fff1c9;
   border-color: #f3d17a;
+}
+
+.plan-badge--trial {
+  color: #8a3d00;
+  background: #fff0e6;
+  border-color: #ffc7a3;
 }
 
 .plan-icon {
@@ -1554,6 +1571,12 @@
 .form-success {
   color: #0f7a43;
   font-weight: 600;
+}
+
+.trial-note {
+  margin-top: -0.2rem;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .name-status {

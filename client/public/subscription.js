@@ -98,7 +98,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getPlanFromToken(token) {
-    return decodeTokenPayload(token)?.plan || "free";
+    const plan = decodeTokenPayload(token)?.plan || "free";
+    return plan === "trial" ? "free" : plan;
   }
 
   function getAuthToken() {

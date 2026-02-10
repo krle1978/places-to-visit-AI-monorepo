@@ -2,11 +2,17 @@ console.log("NEW APP VERSION LOADED");
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API = import.meta.env.VITE_API_URL;
+const configuredApiBase = String(import.meta.env.VITE_API_URL || "").trim();
+const isLocalhostApiBase = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(configuredApiBase);
+const API = import.meta.env.DEV
+  ? window.location.origin
+  : (!configuredApiBase || isLocalhostApiBase ? window.location.origin : configuredApiBase);
+const TRIAL_TOKENS = 3;
 
 const CONNECTING_TIPS = [
   "On mobile, tap “Explore My location!” and allow location access to discover nearby cities.",
   "Create an account to start your plan and unlock benefits with Basic and Premium.",
+  `New accounts start in Trial with ${TRIAL_TOKENS} tokens to try generating cities.`,
   "Use the city search box to quickly find a city—try “Paris” or “Paris, France”.",
   "Use the suggestions under the search box to avoid typos and get better matches.",
   "Switch countries in the planner to explore different destinations and route ideas.",
@@ -141,6 +147,7 @@ export default function App() {
   const [missingCity, setMissingCity] = useState("");
   const [missingCityMessage, setMissingCityMessage] = useState("");
   const [missingCityCandidates, setMissingCityCandidates] = useState([]);
+  const [missingCityGenerateCandidates, setMissingCityGenerateCandidates] = useState([]);
   const [, setMissingCitySuggestion] = useState(null);
   const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
   const [cityGenerateError, setCityGenerateError] = useState("");
@@ -149,6 +156,7 @@ export default function App() {
 
   useEffect(() => {
     setMissingCityCandidates([]);
+    setMissingCityGenerateCandidates([]);
   }, [missingCity]);
 
   useEffect(() => {
@@ -413,6 +421,7 @@ export default function App() {
     const errorMsg = document.getElementById("route-error");
     const resultWrapper = document.querySelector(".route-result-wrapper");
     const routeFormWrapper = document.querySelector(".route-form-wrapper");
+    const resultTitle = resultWrapper?.querySelector(".route-result-title") || null;
     const resultDiv = document.getElementById("route-result");
     const savePdfBtn = document.getElementById("save-pdf-btn");
     const geoPrompt = document.getElementById("geo-unknown");
@@ -445,7 +454,7 @@ export default function App() {
       .toLowerCase()
       .replace(/\s+/g, "_")
       .replace(/-+/g, "_");
-    const allowAutoNearest = !["basic", "premium", "premium_plus"].includes(planKey);
+    const allowAutoNearest = !["trial", "basic", "premium", "premium_plus"].includes(planKey);
     const isPremiumPlan = planKey === "premium" || planKey === "premium_plus";
 
     let countriesReadyDone = false;
@@ -722,6 +731,11 @@ export default function App() {
         return;
       }
 
+      if (resultTitle) {
+        const location = [selectedCityObj?.name, selectedCountry?.name].filter(Boolean).join(", ");
+        resultTitle.textContent = location ? `Your City Guide for ${location}` : "Your City Guide";
+      }
+
       let html = "";
 
       html += `<h3>\uD83D\uDCC5 Full Day Plan</h3>`;
@@ -845,6 +859,7 @@ export default function App() {
       submitBtn.disabled = true;
       selectedCityObj = null;
       resultWrapper.style.display = "none";
+      if (resultTitle) resultTitle.textContent = "Your City Guide";
       if (geoPrompt) geoPrompt.style.display = "none";
     }
 
@@ -1302,7 +1317,7 @@ export default function App() {
     }
 
     if (citySearchInput && citySearchBtn) {
-      const canGenerateCity = ["basic", "premium", "premium_plus"].includes(planKey);
+      const canGenerateCity = ["trial", "basic", "premium", "premium_plus"].includes(planKey);
       let suggestTimer = null;
       let suggestRequestId = 0;
       const citySearchImg = citySearchBtn.querySelector("img.stateful-btn-image");
@@ -2095,21 +2110,27 @@ export default function App() {
     .replace(/-+/g, "_");
   const planLabels = {
     free: "Free",
+    trial: "Trial",
     basic: "Basic",
     premium: "Premium",
     premium_plus: "Premium Plus"
   };
   const planIcons = {
     free: "\u{1F195}",
+    trial: "\u{1F9EA}",
     basic: "\u2B50",
     premium: "\u{1F451}",
     premium_plus: "\u{1F48E}"
   };
   const planLabel = planLabels[planKey] || "Free";
   const planIcon = planIcons[planKey] || "\u{1F195}";
+  const isTrial = planKey === "trial";
+  const safePlanKey = planLabels[planKey] ? planKey : "free";
+  const planBadgeKey = safePlanKey === "premium_plus" ? "premium-plus" : safePlanKey;
+  const planBadgeClassName = `plan-badge plan-badge--${planBadgeKey}`;
   const isFree = planKey === "free";
   const isPremium = planKey === "premium" || planKey === "premium_plus";
-  const canGenerateCity = planKey === "basic" || isPremium;
+  const canGenerateCity = planKey === "trial" || planKey === "basic" || isPremium;
   const greetingName = user?.name || user?.email || "";
   const tokenCount = user ? Number(user.tokens || 0) : null;
 
@@ -2134,7 +2155,7 @@ export default function App() {
     }
   };
 
-  async function generateCityRoute(cityName = missingCity) {
+  async function generateCityRoute(cityName = missingCity, countryOverride = null) {
     if (!cityName || cityGenerateLoading) return;
     if (!canGenerateCity) {
       setCityGenerateError("Your plan does not allow adding new cities.");
@@ -2145,13 +2166,14 @@ export default function App() {
     setCityGenerateError("");
 
     try {
+      const payload = countryOverride ? { city: cityName, country: countryOverride } : { city: cityName };
       const res = await fetch(`${API}/api/cities/generate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ city: cityName })
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json();
@@ -2180,9 +2202,38 @@ export default function App() {
   const handleMissingCityMake = async () => {
     if (!missingCity || cityGenerateLoading) return;
     setCityGenerateError("");
-    setMissingCityMessage(`Generating data for ${missingCity}...`);
     setMissingCityCandidates([]);
-    await generateCityRoute(missingCity);
+    setMissingCityGenerateCandidates([]);
+
+    setMissingCityMessage(`Searching matches for ${missingCity}...`);
+    setCityGenerateLoading(true);
+
+    try {
+      if (!window.routePlannerEasy?.getGeoCandidates) {
+        throw new Error("Route planner is not ready yet.");
+      }
+
+      const candidates = await window.routePlannerEasy.getGeoCandidates(missingCity, "", 8);
+      if (!candidates.length) {
+        throw new Error("No matching city found.");
+      }
+
+      if (candidates.length === 1) {
+        const only = candidates[0];
+        setCityGenerateLoading(false);
+        await generateCityRoute(only?.city || missingCity, only?.country || null);
+        return;
+      }
+
+      setMissingCityMessage("Select the city you meant to generate:");
+      setMissingCityGenerateCandidates(candidates);
+    } catch (err) {
+      const message = err?.message || "Failed to find matching cities.";
+      setCityGenerateError(message);
+      setMissingCityMessage(message);
+    } finally {
+      setCityGenerateLoading(false);
+    }
   };
 
   const handleMissingCityNearest = async () => {
@@ -2190,6 +2241,7 @@ export default function App() {
     setCityGenerateError("");
     setMissingCityMessage("Finding nearest city...");
     setMissingCityCandidates([]);
+    setMissingCityGenerateCandidates([]);
     setCityGenerateLoading(true);
 
     try {
@@ -2235,6 +2287,19 @@ export default function App() {
     }
   };
 
+  const handleMissingCityGenerateCandidateClick = async (candidate) => {
+    if (cityGenerateLoading) return;
+    setCityGenerateError("");
+    setMissingCityCandidates([]);
+    setMissingCityGenerateCandidates([]);
+
+    const cityLabel = candidate?.city || missingCity;
+    const countryLabel = candidate?.country ? ` (${candidate.country})` : "";
+    setMissingCityMessage(`Generating data for ${cityLabel}${countryLabel}...`);
+
+    await generateCityRoute(cityLabel, candidate?.country || null);
+  };
+
   const handleMissingCityCandidateClick = async (candidate) => {
     if (cityGenerateLoading) return;
     setCityGenerateError("");
@@ -2255,6 +2320,7 @@ export default function App() {
       setMissingCity("");
       setMissingCityMessage("");
       setMissingCityCandidates([]);
+      setMissingCityGenerateCandidates([]);
     } catch (err) {
       const message = err?.message || "Failed to find nearest city.";
       setCityGenerateError(message);
@@ -2471,6 +2537,10 @@ export default function App() {
                   </div>
                 </label>
 
+                <div className="trial-note">
+                  New accounts start in <strong>Trial</strong> with <strong>{TRIAL_TOKENS} tokens</strong>.
+                </div>
+
                 <button
                   onClick={signup}
                   className="image-btn"
@@ -2556,7 +2626,20 @@ export default function App() {
           />
           {user?.email && (
             <div className="header-user">
-              Welcome {greetingName}
+              <span>Welcome</span>
+              {isTrial && (
+                <img
+                  className="user-emoji"
+                  src="/emoji/beginner_backpacker.svg"
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                />
+              )}
+              <span className="header-user-name">{greetingName}</span>
+              <span className={planBadgeClassName} title={planLabel} aria-label={`Plan: ${planLabel}`}>
+                {planLabel}
+              </span>
               {typeof tokenCount === "number" && (
                 <span aria-label={`Tokens: ${tokenCount}`}>({tokenCount} tokens)</span>
               )}
@@ -2579,6 +2662,15 @@ export default function App() {
                 <span className="user-menu-icon" aria-hidden="true">
                   {planIcon}
                 </span>
+                {isTrial && (
+                  <img
+                    className="user-emoji"
+                    src="/emoji/beginner_backpacker.svg"
+                    alt=""
+                    aria-hidden="true"
+                    loading="lazy"
+                  />
+                )}
                 {greetingName || "My Account"}
                 {typeof tokenCount === "number" && (
                   <span aria-label={`Tokens: ${tokenCount}`}>({tokenCount})</span>
@@ -2894,6 +2986,31 @@ export default function App() {
                     >
                       {cityGenerateLoading ? "Working..." : "Show nearest city"}
                     </button>
+                    {!!missingCityGenerateCandidates.length && (
+                      <div
+                        className="city-search-suggestions city-search-candidates"
+                        role="listbox"
+                        aria-label="Choose a city to generate"
+                      >
+                        <ul className="city-search-suggestions-list">
+                          {missingCityGenerateCandidates.map((item, idx) => (
+                            <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
+                              <a
+                                href="#"
+                                className="city-search-suggestion"
+                                title={item?.displayName || ""}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  handleMissingCityGenerateCandidateClick(item);
+                                }}
+                              >
+                                {(item?.city || "Unknown") + (item?.country ? ` (${item.country})` : "")}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     {!!missingCityCandidates.length && (
                       <div
                         className="city-search-suggestions city-search-candidates"

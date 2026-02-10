@@ -82,6 +82,18 @@ body {
   font-weight: 600;
 }
 
+.profile-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.user-emoji {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+}
+
 .profile-actions {
   display: flex;
   gap: 0.8rem;

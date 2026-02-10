@@ -667,6 +667,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 const PLAN_RANK = {
   free: 0,
+  trial: 1,
   basic: 1,
   premium: 2,
   premium_plus: 3
@@ -1242,12 +1243,17 @@ app.post("/api/cities/generate", requireAuth, async (req, res) => {
     }
 
     if (!resolvedCountry) {
-      return res.status(404).json({ error: "Country could not be resolved." });
+      return res.status(404).json({
+        error:
+          "Country could not be resolved. Please include the country, e.g. \"Bor, Serbia\" or \"Bor (Serbia)\"."
+      });
     }
 
     const match = await findCountryFileByName(resolvedCountry);
     if (!match) {
-      return res.status(404).json({ error: "No data file for resolved country." });
+      return res.status(404).json({
+        error: `No data file for resolved country (${resolvedCountry}). Please specify the country, e.g. \"${trimmedCity}, Serbia\".`
+      });
     }
 
     const existingCity = await cityExistsInFile(match.file, trimmedCity);
@@ -1469,7 +1475,8 @@ app.post("/api/auth/signup", async (req, res) => {
       name: normalizedName,
       email: normalizedEmail,
       passwordHash,
-      plan: "free",
+      plan: "trial",
+      tokens: 3,
       token,
       emailSendAttempts: 0,
       createdAt: new Date().toISOString()
