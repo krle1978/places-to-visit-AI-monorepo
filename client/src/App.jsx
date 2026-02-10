@@ -147,7 +147,7 @@ export default function App() {
   const [missingCity, setMissingCity] = useState("");
   const [missingCityMessage, setMissingCityMessage] = useState("");
   const [missingCityCandidates, setMissingCityCandidates] = useState([]);
-  const [missingCityGenerateCandidates, setMissingCityGenerateCandidates] = useState([]);
+  const [missingCitySelectedCandidate, setMissingCitySelectedCandidate] = useState(null);
   const [, setMissingCitySuggestion] = useState(null);
   const [cityGenerateLoading, setCityGenerateLoading] = useState(false);
   const [cityGenerateError, setCityGenerateError] = useState("");
@@ -156,7 +156,7 @@ export default function App() {
 
   useEffect(() => {
     setMissingCityCandidates([]);
-    setMissingCityGenerateCandidates([]);
+    setMissingCitySelectedCandidate(null);
   }, [missingCity]);
 
   useEffect(() => {
@@ -1459,6 +1459,8 @@ export default function App() {
           setMissingCity("");
           setMissingCityMessage("");
           setMissingCitySuggestion(null);
+          setMissingCitySelectedCandidate(null);
+          setMissingCityCandidates([]);
           setCityGenerateError("");
           errorMsg.textContent = "Please enter a city name.";
           return;
@@ -1468,6 +1470,8 @@ export default function App() {
           setMissingCity("");
           setMissingCityMessage("");
           setMissingCitySuggestion(null);
+          setMissingCitySelectedCandidate(null);
+          setMissingCityCandidates([]);
           setCityGenerateError("");
           errorMsg.textContent = "City name must be 10 characters or less.";
           return;
@@ -1477,6 +1481,8 @@ export default function App() {
         resultWrapper.style.display = "none";
         setMissingCity("");
         setMissingCityMessage("");
+        setMissingCitySelectedCandidate(null);
+        setMissingCityCandidates([]);
         setCityGenerateError("");
         isSearchLoading = true;
         syncCitySearchBtnState();
@@ -1533,22 +1539,33 @@ export default function App() {
 
           setMissingCity(raw);
           setMissingCitySuggestion(result.suggestion || null);
+          setMissingCitySelectedCandidate(null);
+          setMissingCityCandidates([]);
           if (result.suggestion) {
             errorMsg.textContent = `City not found. Did you mean ${result.suggestion.city}, ${result.suggestion.country}?`;
           } else {
             errorMsg.textContent = "";
           }
 
-          if (isFree) {
-            setMissingCityMessage(
-              "We don't have that city in our offer. Showing the nearest city from our offer."
-            );
-            handleMissingCityNearest();
+          const geoCandidates = window.routePlannerEasy?.getGeoCandidates
+            ? await window.routePlannerEasy.getGeoCandidates(raw, countryHint, 25)
+            : [];
+
+          if (geoCandidates.length > 1) {
+            setMissingCityMessage("Multiple cities found in Europe. Please select one:");
+            setMissingCityCandidates(geoCandidates);
             return;
           }
 
+          if (geoCandidates.length === 1) {
+            const only = geoCandidates[0];
+            setMissingCitySelectedCandidate(only);
+          }
+
           if (canGenerateCity) {
-            setMissingCityMessage("City not found. Choose an option below.");
+            const selected = geoCandidates.length === 1 ? geoCandidates[0] : null;
+            const label = selected?.country ? `${selected.city} (${selected.country})` : raw;
+            setMissingCityMessage(`City not found: ${label}. Choose an option below.`);
           } else {
             setMissingCityMessage(
               "This city is not available in our offer. You can show the nearest city from our offer, or upgrade your plan to generate it."
@@ -2128,7 +2145,6 @@ export default function App() {
   const safePlanKey = planLabels[planKey] ? planKey : "free";
   const planBadgeKey = safePlanKey === "premium_plus" ? "premium-plus" : safePlanKey;
   const planBadgeClassName = `plan-badge plan-badge--${planBadgeKey}`;
-  const isFree = planKey === "free";
   const isPremium = planKey === "premium" || planKey === "premium_plus";
   const canGenerateCity = planKey === "trial" || planKey === "basic" || isPremium;
   const greetingName = user?.name || user?.email || "";
@@ -2202,82 +2218,55 @@ export default function App() {
   const handleMissingCityMake = async () => {
     if (!missingCity || cityGenerateLoading) return;
     setCityGenerateError("");
-    setMissingCityCandidates([]);
-    setMissingCityGenerateCandidates([]);
 
-    setMissingCityMessage(`Searching matches for ${missingCity}...`);
-    setCityGenerateLoading(true);
-
-    try {
-      if (!window.routePlannerEasy?.getGeoCandidates) {
-        throw new Error("Route planner is not ready yet.");
-      }
-
-      const candidates = await window.routePlannerEasy.getGeoCandidates(missingCity, "", 8);
-      if (!candidates.length) {
-        throw new Error("No matching city found.");
-      }
-
-      if (candidates.length === 1) {
-        const only = candidates[0];
-        setCityGenerateLoading(false);
-        await generateCityRoute(only?.city || missingCity, only?.country || null);
-        return;
-      }
-
-      setMissingCityMessage("Select the city you meant to generate:");
-      setMissingCityGenerateCandidates(candidates);
-    } catch (err) {
-      const message = err?.message || "Failed to find matching cities.";
-      setCityGenerateError(message);
-      setMissingCityMessage(message);
-    } finally {
-      setCityGenerateLoading(false);
+    if (!missingCitySelectedCandidate) {
+      setMissingCityMessage("Select the city you meant from the list first.");
+      return;
     }
+
+    const cityLabel = missingCitySelectedCandidate?.city || missingCity;
+    const countryLabel = missingCitySelectedCandidate?.country || "";
+    setMissingCityMessage(
+      `Generating data for ${cityLabel}${countryLabel ? ` (${countryLabel})` : ""}...`
+    );
+
+    await generateCityRoute(cityLabel, missingCitySelectedCandidate?.country || null);
   };
 
   const handleMissingCityNearest = async () => {
     if (cityGenerateLoading) return;
     setCityGenerateError("");
-    setMissingCityMessage("Finding nearest city...");
-    setMissingCityCandidates([]);
-    setMissingCityGenerateCandidates([]);
+
+    if (!missingCitySelectedCandidate) {
+      if (missingCityCandidates.length) {
+        setMissingCityMessage("Select the city you meant from the list first.");
+        return;
+      }
+      setMissingCityMessage("Select the city you meant first.");
+      return;
+    }
+
+    const cityLabel = missingCitySelectedCandidate?.city || missingCity;
+    const countryLabel = missingCitySelectedCandidate?.country || "";
+    setMissingCityMessage(
+      `Finding nearest city to ${cityLabel}${countryLabel ? ` (${countryLabel})` : ""}...`
+    );
     setCityGenerateLoading(true);
 
     try {
-      const rawInput =
-        document.getElementById("city-search-input")?.value?.trim() || String(missingCity || "");
-      const parsed = parseCityQuery(rawInput);
-      const raw = parsed.city;
-      const inputCountryHint = parsed.countryHint;
       const preferredCountry = document.getElementById("route-country")?.value?.trim() || "";
-      const countryHint = inputCountryHint || preferredCountry;
 
-      if (
-        !window.routePlannerEasy?.getGeoCandidates ||
-        !window.routePlannerEasy?.findNearestFromGeoCandidate
-      ) {
+      if (!window.routePlannerEasy?.findNearestFromGeoCandidate) {
         throw new Error("Route planner is not ready yet.");
       }
 
-      const candidates = await window.routePlannerEasy.getGeoCandidates(raw, countryHint, 8);
-      if (!candidates.length) {
-        throw new Error("No matching city found.");
-      }
-
-      if (candidates.length === 1) {
-        const nearest = await window.routePlannerEasy.findNearestFromGeoCandidate(
-          candidates[0],
-          preferredCountry
-        );
-        window.routePlannerEasy.selectLocation(nearest.country, nearest.city, true);
-        setMissingCity("");
-        setMissingCityMessage("");
-        return;
-      }
-
-      setMissingCityMessage("Select the city you meant:");
-      setMissingCityCandidates(candidates);
+      const nearest = await window.routePlannerEasy.findNearestFromGeoCandidate(
+        missingCitySelectedCandidate,
+        preferredCountry
+      );
+      window.routePlannerEasy.selectLocation(nearest.country, nearest.city, true);
+      setMissingCity("");
+      setMissingCityMessage("");
     } catch (err) {
       const message = err?.message || "Failed to find nearest city.";
       setCityGenerateError(message);
@@ -2287,46 +2276,18 @@ export default function App() {
     }
   };
 
-  const handleMissingCityGenerateCandidateClick = async (candidate) => {
-    if (cityGenerateLoading) return;
+  const handleMissingCityCandidateClick = (candidate) => {
     setCityGenerateError("");
+    setMissingCitySelectedCandidate(candidate);
     setMissingCityCandidates([]);
-    setMissingCityGenerateCandidates([]);
 
-    const cityLabel = candidate?.city || missingCity;
-    const countryLabel = candidate?.country ? ` (${candidate.country})` : "";
-    setMissingCityMessage(`Generating data for ${cityLabel}${countryLabel}...`);
-
-    await generateCityRoute(cityLabel, candidate?.country || null);
-  };
-
-  const handleMissingCityCandidateClick = async (candidate) => {
-    if (cityGenerateLoading) return;
-    setCityGenerateError("");
-    setMissingCityMessage("Finding nearest city...");
-    setCityGenerateLoading(true);
-
-    try {
-      const preferredCountry = document.getElementById("route-country")?.value?.trim() || "";
-      if (!window.routePlannerEasy?.findNearestFromGeoCandidate) {
-        throw new Error("Route planner is not ready yet.");
-      }
-
-      const nearest = await window.routePlannerEasy.findNearestFromGeoCandidate(
-        candidate,
-        preferredCountry
+    const label = candidate?.country ? `${candidate.city} (${candidate.country})` : candidate?.city || missingCity;
+    if (canGenerateCity) {
+      setMissingCityMessage(`City not found: ${label}. Choose an option below.`);
+    } else {
+      setMissingCityMessage(
+        "This city is not available in our offer. You can show the nearest city from our offer, or upgrade your plan to generate it."
       );
-      window.routePlannerEasy.selectLocation(nearest.country, nearest.city, true);
-      setMissingCity("");
-      setMissingCityMessage("");
-      setMissingCityCandidates([]);
-      setMissingCityGenerateCandidates([]);
-    } catch (err) {
-      const message = err?.message || "Failed to find nearest city.";
-      setCityGenerateError(message);
-      setMissingCityMessage(message);
-    } finally {
-      setCityGenerateLoading(false);
     }
   };
 
@@ -2968,50 +2929,7 @@ export default function App() {
                     <div className="form-error">{cityGenerateError}</div>
                   )}
                   <div className="city-search-actions">
-                    {canGenerateCity && (
-                      <button
-                        onClick={handleMissingCityMake}
-                        disabled={cityGenerateLoading}
-                        className="btn"
-                        type="button"
-                      >
-                        {cityGenerateLoading ? "Working..." : "Generate This City"}
-                      </button>
-                    )}
-                    <button
-                      onClick={handleMissingCityNearest}
-                      disabled={cityGenerateLoading || !(isServerReady && isServerDataReady)}
-                      className="btn ghost btn-empty-image"
-                      type="button"
-                    >
-                      {cityGenerateLoading ? "Working..." : "Show nearest city"}
-                    </button>
-                    {!!missingCityGenerateCandidates.length && (
-                      <div
-                        className="city-search-suggestions city-search-candidates"
-                        role="listbox"
-                        aria-label="Choose a city to generate"
-                      >
-                        <ul className="city-search-suggestions-list">
-                          {missingCityGenerateCandidates.map((item, idx) => (
-                            <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
-                              <a
-                                href="#"
-                                className="city-search-suggestion"
-                                title={item?.displayName || ""}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  handleMissingCityGenerateCandidateClick(item);
-                                }}
-                              >
-                                {(item?.city || "Unknown") + (item?.country ? ` (${item.country})` : "")}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {!!missingCityCandidates.length && (
+                    {!missingCitySelectedCandidate && !!missingCityCandidates.length && (
                       <div
                         className="city-search-suggestions city-search-candidates"
                         role="listbox"
@@ -3035,6 +2953,32 @@ export default function App() {
                           ))}
                         </ul>
                       </div>
+                    )}
+                    {(missingCitySelectedCandidate || !missingCityCandidates.length) && (
+                      <>
+                        {canGenerateCity && (
+                          <button
+                            onClick={handleMissingCityMake}
+                            disabled={!missingCitySelectedCandidate || cityGenerateLoading}
+                            className="btn"
+                            type="button"
+                          >
+                            {cityGenerateLoading ? "Working..." : "Generate This City"}
+                          </button>
+                        )}
+                        <button
+                          onClick={handleMissingCityNearest}
+                          disabled={
+                            !missingCitySelectedCandidate ||
+                            cityGenerateLoading ||
+                            !(isServerReady && isServerDataReady)
+                          }
+                          className="btn ghost btn-empty-image"
+                          type="button"
+                        >
+                          {cityGenerateLoading ? "Working..." : "Show nearest city"}
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

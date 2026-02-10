@@ -175,6 +175,7 @@ function signUserToken(user) {
   return jwt.sign(
     {
       userId: user.id,
+      name: user.name,
       email: user.email,
       plan: user.plan
     },

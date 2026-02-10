@@ -1056,7 +1056,7 @@ app.get("/api/geo/candidates", async (req, res) => {
     const countryHint = String(req.query.country || "").trim();
     const limitRaw = Number(req.query.limit);
     const limit = Number.isFinite(limitRaw) ? Math.round(limitRaw) : 8;
-    const safeLimit = Math.min(Math.max(limit, 1), 10);
+    const safeLimit = Math.min(Math.max(limit, 1), 25);
 
     if (!city) {
       return res.status(400).json({ error: "City is required." });
@@ -1353,7 +1353,11 @@ if (!process.env.VERCEL && isEntrypoint) {
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   try {
     const users = await readJsonFile(USERS_PATH, []);
-    const match = users.find((u) => u.id === req.user?.userId);
+    let match = users.find((u) => u.id === req.user?.userId);
+    if (!match && req.user?.email) {
+      const normalized = normalizeEmail(req.user.email);
+      match = users.find((u) => normalizeEmail(u.email) === normalized) || null;
+    }
     if (match) {
       const changed = normalizeUserTokens(match);
       if (changed) {
@@ -1363,7 +1367,7 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
 
     return res.json({
       userId: req.user?.userId,
-      name: match?.name || "",
+      name: match?.name || req.user?.name || "",
       email: req.user?.email,
       plan: match?.plan || req.user?.plan || "free",
       tokens: Number(match?.tokens || 0)
@@ -1541,6 +1545,7 @@ app.get("/api/auth/confirm", async (req, res) => {
     const authToken = jwt.sign(
       {
         userId: user.id,
+        name: user.name,
         email: user.email,
         plan: user.plan
       },
@@ -1593,6 +1598,7 @@ app.post("/api/auth/login", async (req, res) => {
   const token = jwt.sign(
     {
       userId: user.id,
+      name: user.name,
       email: user.email,
       plan: user.plan
     },
