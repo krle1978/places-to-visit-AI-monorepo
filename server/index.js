@@ -562,7 +562,14 @@ async function generateCityInFile(fileName, city, fallbackCountry) {
     throw err;
   }
 
-  const parsed = await countriesStore.readCountryDocument(resolved.file);
+  const canonicalFile = await countriesStore.resolveFileName(resolved.file);
+  if (!canonicalFile) {
+    const err = new Error("File not found.");
+    err.status = 404;
+    throw err;
+  }
+
+  const parsed = await countriesStore.readCountryDocument(canonicalFile);
   if (!parsed) {
     const err = new Error("File not found.");
     err.status = 404;
@@ -582,7 +589,7 @@ async function generateCityInFile(fileName, city, fallbackCountry) {
   );
 
   if (existing) {
-    return { created: false, city: existing.name, country: parsed.name, file: resolved.file };
+    return { created: false, city: existing.name, country: parsed.name, file: canonicalFile };
   }
 
   const promptCountry = parsed?.name || fallbackCountry || "";
@@ -644,11 +651,11 @@ Rules: interests is an object; use Google Maps search URLs; keep descriptions co
   parsed.cities.push(cityJSON);
   parsed.cities.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-  await countriesStore.writeCountryDocument(resolved.file, parsed);
+  await countriesStore.writeCountryDocument(canonicalFile, parsed);
   offerCityIndex = null;
   offerCityIndexPromise = null;
 
-  return { created: true, city: cityJSON.name, country: parsed.name, file: resolved.file };
+  return { created: true, city: cityJSON.name, country: parsed.name, file: canonicalFile };
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -1147,7 +1154,11 @@ app.get("/api/geo/nearest", async (req, res) => {
       if (resolved.error) {
         return res.status(400).json({ error: resolved.error });
       }
-      resolvedFile = resolved.file;
+      const canonicalFile = await countriesStore.resolveFileName(resolved.file);
+      if (!canonicalFile) {
+        return res.status(404).json({ error: "File not found." });
+      }
+      resolvedFile = canonicalFile;
     }
 
     const index = await getOfferCityIndex();

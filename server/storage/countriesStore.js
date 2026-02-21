@@ -128,6 +128,40 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
     return initPromise;
   }
 
+  async function resolveFileName(fileName) {
+    const resolved = validateFileName(fileName);
+    if (resolved.error) {
+      const err = new Error(resolved.error);
+      err.status = 400;
+      throw err;
+    }
+
+    await ensureInitialized();
+
+    if (!useDatabase) {
+      const files = await fs.promises.readdir(normalizedDir);
+      const exactMatch = files.find((file) => file === resolved.file);
+      if (exactMatch) return exactMatch;
+
+      const lowered = resolved.file.toLowerCase();
+      return (
+        files.find((file) => file.endsWith(".json") && file.toLowerCase() === lowered) || null
+      );
+    }
+
+    const exact = await pool.query(
+      "SELECT file_name FROM country_documents WHERE file_name = $1 LIMIT 1",
+      [resolved.file]
+    );
+    if (exact.rowCount) return exact.rows[0].file_name;
+
+    const insensitive = await pool.query(
+      "SELECT file_name FROM country_documents WHERE lower(file_name) = lower($1) LIMIT 1",
+      [resolved.file]
+    );
+    return insensitive.rowCount ? insensitive.rows[0].file_name : null;
+  }
+
   async function listCountryEntries() {
     await ensureInitialized();
 
@@ -145,18 +179,12 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
   }
 
   async function readCountryDocument(fileName) {
-    const resolved = validateFileName(fileName);
-    if (resolved.error) {
-      const err = new Error(resolved.error);
-      err.status = 400;
-      throw err;
-    }
-
-    await ensureInitialized();
+    const canonicalFile = await resolveFileName(fileName);
+    if (!canonicalFile) return null;
 
     if (!useDatabase) {
       try {
-        return await readDiskCountry(resolved.file);
+        return await readDiskCountry(canonicalFile);
       } catch (err) {
         if (err.code === "ENOENT") return null;
         throw err;
@@ -165,7 +193,7 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
 
     const result = await pool.query(
       "SELECT payload FROM country_documents WHERE file_name = $1 LIMIT 1",
-      [resolved.file]
+      [canonicalFile]
     );
     if (!result.rowCount) return null;
 
@@ -188,9 +216,11 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
     }
 
     await ensureInitialized();
+    const canonicalFile = await resolveFileName(resolved.file);
+    const targetFile = canonicalFile || resolved.file;
 
     if (!useDatabase) {
-      const fullPath = path.join(normalizedDir, resolved.file);
+      const fullPath = path.join(normalizedDir, targetFile);
       await fs.promises.writeFile(fullPath, JSON.stringify(payload, null, 2), "utf8");
       return;
     }
@@ -205,7 +235,7 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
           payload = EXCLUDED.payload,
           updated_at = NOW()
       `,
-      [resolved.file, countryName, JSON.stringify(payload)]
+      [targetFile, countryName, JSON.stringify(payload)]
     );
   }
 
@@ -229,6 +259,7 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
   return {
     init: ensureInitialized,
     validateFileName,
+    resolveFileName,
     listCountryEntries,
     readCountryDocument,
     writeCountryDocument,
