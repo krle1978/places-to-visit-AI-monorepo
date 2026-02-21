@@ -13,6 +13,7 @@ import nodemailer from "nodemailer";
 import { requireAuth } from "./middleware/auth.js";
 import { registerWebhookRoutes } from "./routes/webhook.js";
 import { createCountriesStore } from "./storage/countriesStore.js";
+import { createUsersStore } from "./storage/usersStore.js";
 
 // Load env from `server/.env` regardless of where the process is started from.
 dotenv.config({ path: fileURLToPath(new URL(".env", import.meta.url)) });
@@ -21,7 +22,6 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-registerWebhookRoutes(app);
 
 app.get("/", (req, res) => {
   res.json({
@@ -76,12 +76,17 @@ const PENDING_SIGNUP_TTL_MS = Number(process.env.PENDING_SIGNUP_TTL_MS || 24 * 6
 const PENDING_RESEND_MIN_INTERVAL_MS = Number(
   process.env.PENDING_RESEND_MIN_INTERVAL_MS || 60 * 1000
 );
-const COUNTRIES_DATABASE_URL =
+const DATABASE_URL =
   process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRESQL_URL || "";
 const countriesStore = createCountriesStore({
   countriesDir: COUNTRIES_DIR,
-  databaseUrl: COUNTRIES_DATABASE_URL
+  databaseUrl: DATABASE_URL
 });
+const usersStore = createUsersStore({
+  dataDir: DATA_DIR,
+  databaseUrl: DATABASE_URL
+});
+registerWebhookRoutes(app, { usersStore });
 
 
 function normalizeName(value) {
@@ -424,6 +429,13 @@ function resolveCountryAlias(input) {
 }
 
 async function readJsonFile(filePath, fallback) {
+  if (filePath === USERS_PATH) {
+    return usersStore.readUsers();
+  }
+  if (filePath === PENDING_USERS_PATH) {
+    return usersStore.readPendingUsers();
+  }
+
   try {
     const raw = await fs.promises.readFile(filePath, "utf8");
     return JSON.parse(raw);
@@ -434,6 +446,15 @@ async function readJsonFile(filePath, fallback) {
 }
 
 async function writeJsonFile(filePath, data) {
+  if (filePath === USERS_PATH) {
+    await usersStore.writeUsers(Array.isArray(data) ? data : []);
+    return;
+  }
+  if (filePath === PENDING_USERS_PATH) {
+    await usersStore.writePendingUsers(Array.isArray(data) ? data : []);
+    return;
+  }
+
   await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
 }
 
@@ -1331,10 +1352,12 @@ const entryPath = process.argv?.[1];
 const isEntrypoint = entryPath ? import.meta.url === pathToFileURL(entryPath).href : false;
 if (!process.env.VERCEL && isEntrypoint) {
   let countriesStorageInfo = null;
+  let usersStorageInfo = null;
   try {
     countriesStorageInfo = await countriesStore.init();
+    usersStorageInfo = await usersStore.init();
   } catch (err) {
-    console.error("Failed to initialize countries storage.", err);
+    console.error("Failed to initialize storage.", err);
     process.exit(1);
   }
 
@@ -1344,6 +1367,14 @@ if (!process.env.VERCEL && isEntrypoint) {
     );
   } else {
     console.log("Countries storage: local JSON files.");
+  }
+
+  if (usersStorageInfo.mode === "postgres") {
+    console.log(
+      `Users storage: PostgreSQL${usersStorageInfo.seededUsers || usersStorageInfo.seededPending ? ` (seeded users: ${usersStorageInfo.seededUsers}, pending: ${usersStorageInfo.seededPending})` : ""}.`
+    );
+  } else {
+    console.log("Users storage: local JSON files.");
   }
 
   server = app.listen(port, () => {

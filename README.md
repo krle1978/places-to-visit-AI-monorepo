@@ -16,7 +16,8 @@ cd server
 npm install
 npm start
 
-## Persisting countries data on Render
+## Persisting backend data on Render
 - Set `DATABASE_URL` on the backend service (Render Postgres connection string).
 - On first boot with `DATABASE_URL`, backend seeds `server/data/countries/*.json` into Postgres table `country_documents`.
-- After that, `/api/countries*` reads/writes from Postgres so city additions remain persistent across deploys.
+- On first boot with `DATABASE_URL`, backend also seeds `server/data/users.json` and `server/data/pending_users.json` into Postgres tables `app_users` and `pending_user_signups`.
+- After that, `/api/countries*` and auth flows (`signup/login/confirm/me`, token updates) read/write from Postgres so changes remain persistent across deploys.

@@ -1,14 +1,12 @@
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import { requireAuth } from "../middleware/auth.js";
+import { createUsersStore } from "../storage/usersStore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "..", "data");
-const USERS_PATH = path.join(DATA_DIR, "users.json");
-const JWT_SECRET = process.env.JWT_SECRET;
 
 const AMOUNT_TO_TOKENS = {
   5: 7,
@@ -152,21 +150,9 @@ async function paypalRequest(pathname, { method = "GET", accessToken, body } = {
   return data;
 }
 
-function readUsers() {
-  try {
-    const raw = fs.readFileSync(USERS_PATH, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function writeUsers(users) {
-  fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 2), "utf8");
-}
-
 function signUserToken(user) {
-  if (!JWT_SECRET) {
+  const jwtSecret = String(process.env.JWT_SECRET || "").trim();
+  if (!jwtSecret) {
     const err = new Error("JWT secret is not configured.");
     err.status = 500;
     throw err;
@@ -179,12 +165,12 @@ function signUserToken(user) {
       email: user.email,
       plan: user.plan
     },
-    JWT_SECRET,
+    jwtSecret,
     { expiresIn: "7d" }
   );
 }
 
-function creditTokensForUser(email, amount) {
+async function creditTokensForUser(usersStore, email, amount) {
   const tokens = AMOUNT_TO_TOKENS[amount];
   const plan = AMOUNT_TO_PLAN[amount];
 
@@ -194,7 +180,7 @@ function creditTokensForUser(email, amount) {
     throw err;
   }
 
-  const users = readUsers();
+  const users = await usersStore.readUsers();
   const normalized = normalizeEmail(email);
   const user = users.find((u) => normalizeEmail(u.email) === normalized);
   if (!user) {
@@ -222,7 +208,7 @@ function creditTokensForUser(email, amount) {
 
   user.tokens += tokens;
   user.plan = plan;
-  writeUsers(users);
+  await usersStore.writeUsers(users);
 
   return {
     user,
@@ -230,7 +216,7 @@ function creditTokensForUser(email, amount) {
   };
 }
 
-function assertPurchaseAllowed(email, amount) {
+async function assertPurchaseAllowed(usersStore, email, amount) {
   const plan = AMOUNT_TO_PLAN[amount];
   if (!plan) {
     const err = new Error("Unsupported amount.");
@@ -238,7 +224,7 @@ function assertPurchaseAllowed(email, amount) {
     throw err;
   }
 
-  const users = readUsers();
+  const users = await usersStore.readUsers();
   const normalized = normalizeEmail(email);
   const user = users.find((u) => normalizeEmail(u.email) === normalized);
   if (!user) {
@@ -268,11 +254,25 @@ function assertPurchaseAllowed(email, amount) {
   }
 
   if (changed) {
-    writeUsers(users);
+    await usersStore.writeUsers(users);
   }
 }
 
-export function registerWebhookRoutes(app) {
+export function registerWebhookRoutes(app, options = {}) {
+  const usersStore =
+    options?.usersStore ||
+    createUsersStore({
+      dataDir: DATA_DIR,
+      databaseUrl:
+        process.env.DATABASE_URL ||
+        process.env.POSTGRES_URL ||
+        process.env.POSTGRESQL_URL ||
+        ""
+    });
+  usersStore.init().catch((err) => {
+    console.error("Failed to initialize users storage for webhook routes.", err);
+  });
+
   app.get("/api/payments/paypal/config", (req, res) => {
     if (!PAYPAL_CLIENT_ID) {
       return res.status(500).json({ error: "PayPal client ID is not configured." });
@@ -297,7 +297,7 @@ export function registerWebhookRoutes(app) {
       if (!amount) {
         return res.status(400).json({ error: "Unsupported amount." });
       }
-      assertPurchaseAllowed(req.user?.email, amount);
+      await assertPurchaseAllowed(usersStore, req.user?.email, amount);
 
       const accessToken = await getPayPalAccessToken();
       const order = await paypalRequest("/v2/checkout/orders", {
@@ -366,7 +366,7 @@ export function registerWebhookRoutes(app) {
         }
       }
 
-      const result = creditTokensForUser(req.user?.email, allowedAmount);
+      const result = await creditTokensForUser(usersStore, req.user?.email, allowedAmount);
       const token = signUserToken(result.user);
 
       return res.json({
