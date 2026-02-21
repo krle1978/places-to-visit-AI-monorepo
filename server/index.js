@@ -12,6 +12,7 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { requireAuth } from "./middleware/auth.js";
 import { registerWebhookRoutes } from "./routes/webhook.js";
+import { createCountriesStore } from "./storage/countriesStore.js";
 
 // Load env from `server/.env` regardless of where the process is started from.
 dotenv.config({ path: fileURLToPath(new URL(".env", import.meta.url)) });
@@ -75,6 +76,12 @@ const PENDING_SIGNUP_TTL_MS = Number(process.env.PENDING_SIGNUP_TTL_MS || 24 * 6
 const PENDING_RESEND_MIN_INTERVAL_MS = Number(
   process.env.PENDING_RESEND_MIN_INTERVAL_MS || 60 * 1000
 );
+const COUNTRIES_DATABASE_URL =
+  process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRESQL_URL || "";
+const countriesStore = createCountriesStore({
+  countriesDir: COUNTRIES_DIR,
+  databaseUrl: COUNTRIES_DATABASE_URL
+});
 
 
 function normalizeName(value) {
@@ -255,19 +262,17 @@ async function getSupportedCountryKeys() {
 
   supportedCountryKeysPromise = (async () => {
     const keys = new Set();
-    const files = await fs.promises.readdir(COUNTRIES_DIR);
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
+    const documents = await countriesStore.readAllCountryDocuments();
+    for (const document of documents) {
       try {
-        const raw = await fs.promises.readFile(path.join(COUNTRIES_DIR, file), "utf8");
-        const parsed = JSON.parse(raw);
+        const parsed = document.payload;
         const name = String(parsed?.name || "").trim();
         if (!name) continue;
         keys.add(normalizeKey(name));
         const base = stripParenthetical(name);
         if (base) keys.add(normalizeKey(base));
       } catch (err) {
-        console.error(`Failed to load country file for supported list: ${file}`);
+        console.error("Failed to load country for supported list.", err);
       }
     }
     supportedCountryKeys = keys;
@@ -280,13 +285,13 @@ async function getSupportedCountryKeys() {
 
 async function buildOfferCityIndex() {
   await loadCityGeoCacheFromDisk();
-  const files = (await fs.promises.readdir(COUNTRIES_DIR)).filter((file) => file.endsWith(".json"));
+  const documents = await countriesStore.readAllCountryDocuments();
 
   const tasks = [];
-  for (const file of files) {
+  for (const document of documents) {
+    const file = document.file;
     try {
-      const raw = await fs.promises.readFile(path.join(COUNTRIES_DIR, file), "utf8");
-      const parsed = JSON.parse(raw);
+      const parsed = document.payload;
       const countryName = String(parsed?.name || "").trim();
       const countryForGeo = stripParenthetical(countryName);
       const cities = Array.isArray(parsed?.cities) ? parsed.cities : [];
@@ -296,7 +301,7 @@ async function buildOfferCityIndex() {
         tasks.push({ file, countryForGeo, cityName });
       }
     } catch (err) {
-      console.error(`Failed to read country file: ${file}`, err);
+      console.error(`Failed to read country record: ${file}`, err);
     }
   }
 
@@ -331,8 +336,8 @@ async function cityExistsInFile(fileName, cityName) {
   const resolved = resolveCountryFile(fileName);
   if (resolved.error) return null;
 
-  const raw = await fs.promises.readFile(resolved.path, "utf8");
-  const parsed = JSON.parse(raw);
+  const parsed = await countriesStore.readCountryDocument(resolved.file);
+  if (!parsed) return null;
   const cities = Array.isArray(parsed?.cities) ? parsed.cities : [];
   const target = normalizeName(cityName);
 
@@ -494,16 +499,7 @@ async function sendSignupEmail(to, confirmUrl) {
 }
 
 function resolveCountryFile(fileName) {
-  if (!fileName || !fileName.endsWith(".json")) {
-    return { error: "Invalid file name." };
-  }
-
-  const resolvedPath = path.resolve(COUNTRIES_DIR, fileName);
-  if (!resolvedPath.startsWith(COUNTRIES_DIR + path.sep)) {
-    return { error: "Invalid file path." };
-  }
-
-  return { path: resolvedPath };
+  return countriesStore.validateFileName(fileName);
 }
 
 async function resolveCountryForCity(city) {
@@ -532,14 +528,12 @@ async function findCountryFileByName(countryName) {
   const aliased = resolveCountryAlias(countryName);
   const normalizedTarget = normalizeName(aliased);
   const targetKey = normalizeKey(aliased);
-  const files = await fs.promises.readdir(COUNTRIES_DIR);
+  const documents = await countriesStore.readAllCountryDocuments();
 
-  for (const file of files) {
-    if (!file.endsWith(".json")) continue;
+  for (const document of documents) {
+    const file = document.file;
     try {
-      const fullPath = path.join(COUNTRIES_DIR, file);
-      const raw = await fs.promises.readFile(fullPath, "utf8");
-      const parsed = JSON.parse(raw);
+      const parsed = document.payload;
       const name = parsed?.name || "";
       if (!name) continue;
 
@@ -553,7 +547,7 @@ async function findCountryFileByName(countryName) {
         return { file, country: name };
       }
     } catch (err) {
-      console.error(`Failed to load country file: ${file}`);
+      console.error(`Failed to load country record: ${file}`);
     }
   }
 
@@ -568,8 +562,12 @@ async function generateCityInFile(fileName, city, fallbackCountry) {
     throw err;
   }
 
-  const raw = await fs.promises.readFile(resolved.path, "utf8");
-  const parsed = JSON.parse(raw);
+  const parsed = await countriesStore.readCountryDocument(resolved.file);
+  if (!parsed) {
+    const err = new Error("File not found.");
+    err.status = 404;
+    throw err;
+  }
   parsed.cities = Array.isArray(parsed.cities) ? parsed.cities : [];
 
   const trimmedCity = city.trim();
@@ -584,7 +582,7 @@ async function generateCityInFile(fileName, city, fallbackCountry) {
   );
 
   if (existing) {
-    return { created: false, city: existing.name, country: parsed.name, file: fileName };
+    return { created: false, city: existing.name, country: parsed.name, file: resolved.file };
   }
 
   const promptCountry = parsed?.name || fallbackCountry || "";
@@ -646,9 +644,11 @@ Rules: interests is an object; use Google Maps search URLs; keep descriptions co
   parsed.cities.push(cityJSON);
   parsed.cities.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-  await fs.promises.writeFile(resolved.path, JSON.stringify(parsed, null, 2), "utf8");
+  await countriesStore.writeCountryDocument(resolved.file, parsed);
+  offerCityIndex = null;
+  offerCityIndexPromise = null;
 
-  return { created: true, city: cityJSON.name, country: parsed.name, file: fileName };
+  return { created: true, city: cityJSON.name, country: parsed.name, file: resolved.file };
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -1136,6 +1136,7 @@ app.get("/api/geo/nearest", async (req, res) => {
     const lat = Number(req.query.lat);
     const lon = Number(req.query.lon);
     const fileName = String(req.query.file || "").trim();
+    let resolvedFile = "";
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return res.status(400).json({ error: "Invalid coordinates." });
@@ -1146,10 +1147,13 @@ app.get("/api/geo/nearest", async (req, res) => {
       if (resolved.error) {
         return res.status(400).json({ error: resolved.error });
       }
+      resolvedFile = resolved.file;
     }
 
     const index = await getOfferCityIndex();
-    const candidates = fileName ? index.filter((entry) => entry.file === fileName) : index;
+    const candidates = resolvedFile
+      ? index.filter((entry) => entry.file === resolvedFile)
+      : index;
 
     if (!candidates.length) {
       return res.status(404).json({ error: "No nearby city found." });
@@ -1281,28 +1285,7 @@ app.post("/api/cities/generate", requireAuth, async (req, res) => {
 
 app.get("/api/countries", async (req, res) => {
   try {
-    const files = await fs.promises.readdir(COUNTRIES_DIR);
-    const jsonFiles = files.filter((file) => file.endsWith(".json"));
-
-    const entries = await Promise.all(
-      jsonFiles.map(async (file) => {
-        try {
-          const fullPath = path.join(COUNTRIES_DIR, file);
-          const raw = await fs.promises.readFile(fullPath, "utf8");
-          const parsed = JSON.parse(raw);
-          if (!parsed?.name) return null;
-          return { name: parsed.name, file };
-        } catch (err) {
-          console.error(`Failed to load country file: ${file}`);
-          return null;
-        }
-      })
-    );
-
-    const countries = entries
-      .filter(Boolean)
-      .sort((a, b) => a.name.localeCompare(b.name));
-
+    const countries = await countriesStore.listCountryEntries();
     return res.json({ countries });
   } catch (err) {
     console.error(err);
@@ -1310,24 +1293,24 @@ app.get("/api/countries", async (req, res) => {
   }
 });
 
-app.get("/api/countries/:file", (req, res) => {
-  const fileName = req.params.file;
-  const resolved = resolveCountryFile(fileName);
-  if (resolved.error) {
-    return res.status(400).json({ error: resolved.error });
-  }
+app.get("/api/countries/:file", async (req, res) => {
+  try {
+    const fileName = req.params.file;
+    const resolved = resolveCountryFile(fileName);
+    if (resolved.error) {
+      return res.status(400).json({ error: resolved.error });
+    }
 
-  fs.readFile(resolved.path, "utf8", (err, data) => {
-    if (err) {
+    const payload = await countriesStore.readCountryDocument(resolved.file);
+    if (!payload) {
       return res.status(404).json({ error: "File not found." });
     }
 
-    try {
-      return res.json(JSON.parse(data));
-    } catch (parseErr) {
-      return res.status(500).json({ error: "Invalid JSON file." });
-    }
-  });
+    return res.json(payload);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Invalid JSON file." });
+  }
 });
 
 const port = Number(process.env.PORT || 3001);
@@ -1336,6 +1319,22 @@ let server = null;
 const entryPath = process.argv?.[1];
 const isEntrypoint = entryPath ? import.meta.url === pathToFileURL(entryPath).href : false;
 if (!process.env.VERCEL && isEntrypoint) {
+  let countriesStorageInfo = null;
+  try {
+    countriesStorageInfo = await countriesStore.init();
+  } catch (err) {
+    console.error("Failed to initialize countries storage.", err);
+    process.exit(1);
+  }
+
+  if (countriesStorageInfo.mode === "postgres") {
+    console.log(
+      `Countries storage: PostgreSQL${countriesStorageInfo.seeded ? ` (seeded ${countriesStorageInfo.seeded} records from disk)` : ""}.`
+    );
+  } else {
+    console.log("Countries storage: local JSON files.");
+  }
+
   server = app.listen(port, () => {
     console.log(`API running on http://localhost:${port}`);
     setTimeout(() => {

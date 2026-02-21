@@ -20,6 +20,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.16",
     "openai": "^6.10.0",
+    "pg": "^8.18.0",
     "places-to-visit-monorepo": "file:.."
   },
   "devDependencies": {
