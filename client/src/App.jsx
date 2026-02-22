@@ -8,6 +8,16 @@ const API = import.meta.env.DEV
   ? window.location.origin
   : (!configuredApiBase || isLocalhostApiBase ? window.location.origin : configuredApiBase);
 const TRIAL_TOKENS = 3;
+const CITY_SEARCH_MAX_LENGTH = 25;
+const CITY_ALIASES_BY_COUNTRY = {
+  serbia: {
+    belgrade: "Beograd",
+    cityofbelgrade: "Beograd",
+    citiofbelgrade: "Beograd",
+    nis: "Nis",
+    petrovaradin: "Novi Sad"
+  }
+};
 
 const CONNECTING_TIPS = [
   "On mobile, tap “Explore My location!” and allow location access to discover nearby cities.",
@@ -1013,23 +1023,82 @@ export default function App() {
 
     function resolveCityAlias(cityName, countryName) {
       if (!cityName) return "";
-      const normalizedCountry = normalizeName(countryName);
       const normalizedCity = normalizeKey(cityName);
-      const aliasesByCountry = {
-        serbia: {
-          belgrade: "Beograd",
-          cityofbelgrade: "Beograd",
-          citiofbelgrade: "Beograd",
-          nis: "Niš"
-        }
-      };
-      const countryAliases = aliasesByCountry[normalizedCountry];
-      return countryAliases?.[normalizedCity] || cityName;
+      if (!normalizedCity) return "";
+      const normalizedCountry = normalizeName(countryName);
+
+      if (normalizedCountry) {
+        const countryAliases = CITY_ALIASES_BY_COUNTRY[normalizedCountry];
+        return countryAliases?.[normalizedCity] || cityName;
+      }
+
+      for (const aliases of Object.values(CITY_ALIASES_BY_COUNTRY)) {
+        const aliasCity = aliases?.[normalizedCity];
+        if (aliasCity) return aliasCity;
+      }
+
+      return cityName;
     }
 
-    function findCityOption(cityName) {
+    function findCountryFromAliasKey(countryKey) {
+      if (!countryKey) return "";
+      return Object.keys(countryFileMap).find((name) => normalizeName(name) === countryKey) || "";
+    }
+
+    function resolveCityAliasMatch(cityName, countryName = "") {
       if (!cityName) return null;
-      const resolvedCity = resolveCityAlias(cityName, countrySelect?.value || "");
+      const normalizedCity = normalizeKey(cityName);
+      if (!normalizedCity) return null;
+
+      const normalizedCountry = normalizeName(countryName);
+      if (normalizedCountry) {
+        const aliasCity = CITY_ALIASES_BY_COUNTRY[normalizedCountry]?.[normalizedCity];
+        if (!aliasCity) return null;
+        const canonicalCountry = findCountryFromAliasKey(normalizedCountry) || countryName;
+        return canonicalCountry ? { country: canonicalCountry, city: aliasCity } : null;
+      }
+
+      for (const [countryKey, aliases] of Object.entries(CITY_ALIASES_BY_COUNTRY)) {
+        const aliasCity = aliases?.[normalizedCity];
+        if (!aliasCity) continue;
+        const canonicalCountry = findCountryFromAliasKey(countryKey);
+        if (!canonicalCountry) continue;
+        return { country: canonicalCountry, city: aliasCity };
+      }
+
+      return null;
+    }
+
+    function buildAliasSuggestions(query, limit = 12) {
+      const normalizedQuery = normalizeKey(query);
+      if (!normalizedQuery) return [];
+
+      const matches = [];
+      const seen = new Set();
+
+      for (const [countryKey, aliases] of Object.entries(CITY_ALIASES_BY_COUNTRY)) {
+        const countryName = findCountryFromAliasKey(countryKey);
+        if (!countryName) continue;
+
+        for (const [aliasKey, mappedCity] of Object.entries(aliases || {})) {
+          if (!aliasKey.includes(normalizedQuery) && !normalizedQuery.includes(aliasKey)) continue;
+          const dedupeKey = `${normalizeName(countryName)}::${normalizeKey(mappedCity)}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+          matches.push({ country: countryName, city: mappedCity });
+          if (matches.length >= limit) return matches;
+        }
+      }
+
+      return matches;
+    }
+
+    function findCityOption(cityName, options = {}) {
+      if (!cityName) return null;
+      const skipAlias = Boolean(options?.skipAlias);
+      const resolvedCity = skipAlias
+        ? cityName
+        : resolveCityAlias(cityName, countrySelect?.value || "");
       const normalized = normalizeName(resolvedCity);
       const targetKey = normalizeKey(resolvedCity);
       const exact = Array.from(citySelect.options).find(
@@ -1073,9 +1142,15 @@ export default function App() {
       return dp[a.length][b.length];
     }
 
-    async function findCityAcrossCountries(cityQuery) {
+    async function findCityAcrossCountries(cityQuery, countryHint = "") {
       const normalizedQuery = normalizeName(cityQuery);
       if (!normalizedQuery) return { match: null, suggestion: null };
+
+      const resolvedHint = findCountryName(countryHint) || countryHint;
+      const aliasMatch = resolveCityAliasMatch(cityQuery, resolvedHint);
+      if (aliasMatch?.country && aliasMatch?.city) {
+        return { match: aliasMatch, suggestion: null };
+      }
 
       let best = null;
       let bestDistance = Infinity;
@@ -1155,7 +1230,9 @@ export default function App() {
       const targetCity = pendingSelection.city;
       if (!targetCity) return;
 
-      const match = findCityOption(targetCity);
+      const match = findCityOption(targetCity, {
+        skipAlias: Boolean(pendingSelection.skipCityAlias)
+      });
 
       if (match) {
         citySelect.value = match.value;
@@ -1206,7 +1283,10 @@ export default function App() {
 
       if (pendingSelection.allowPrompt && geoPrompt) {
         if (geoPromptText) {
-          geoPromptText.textContent = "This Location is for me unknown.";
+          const locationLabel = [geoContext?.city, geoContext?.country].filter(Boolean).join(", ");
+          geoPromptText.textContent = locationLabel
+            ? `${locationLabel} is not in our city list yet.`
+            : "This Location is for me unknown.";
         }
         geoPrompt.style.display = "block";
         pendingSelection.allowPrompt = false;
@@ -1241,25 +1321,35 @@ export default function App() {
             );
 
             const countryName = findCountryName(data?.country);
-            const cityName = resolveCityAlias(data?.city || "", countryName);
+            const detectedCity = String(data?.locality || data?.city || "").trim();
 
             if (!countryName) {
               errorMsg.textContent = "No matching country found.";
               return;
             }
+            if (!detectedCity) {
+              errorMsg.textContent = "No matching city found.";
+              return;
+            }
+
+            if (citySearchInput) {
+              citySearchInput.value = detectedCity.slice(0, CITY_SEARCH_MAX_LENGTH);
+              citySearchInput.dispatchEvent(new Event("input"));
+            }
 
             geoContext = {
               country: countryName,
-              city: cityName,
+              city: detectedCity,
               lat: latitude,
               lon: longitude
             };
             if (geoPrompt) geoPrompt.style.display = "none";
             pendingSelection = {
               country: countryName,
-              city: cityName,
+              city: detectedCity,
               autoSubmit: true,
-              allowPrompt: true
+              allowPrompt: true,
+              skipCityAlias: true
             };
 
             openPlannerPanel();
@@ -1368,7 +1458,11 @@ export default function App() {
         const normalizedQuery = normalizeName(query);
         if (!normalizedQuery) return [];
 
-        const matches = [];
+        const matches = buildAliasSuggestions(query, 12);
+        const seen = new Set(
+          matches.map((item) => `${normalizeName(item.country)}::${normalizeKey(item.city)}`)
+        );
+        if (matches.length >= 12) return matches;
         const entries = Object.entries(countryFileMap);
 
         for (const [countryName, fileName] of entries) {
@@ -1392,6 +1486,9 @@ export default function App() {
             const normalizedCity = normalizeName(cityName);
             if (!normalizedCity) continue;
             if (normalizedCity.includes(normalizedQuery)) {
+              const dedupeKey = `${normalizeName(countryName)}::${normalizeKey(cityName)}`;
+              if (seen.has(dedupeKey)) continue;
+              seen.add(dedupeKey);
               matches.push({ country: countryName, city: cityName });
               if (matches.length >= 12) return matches;
             }
@@ -1466,14 +1563,14 @@ export default function App() {
           return;
         }
 
-        if (raw.length > 10) {
+        if (raw.length > CITY_SEARCH_MAX_LENGTH) {
           setMissingCity("");
           setMissingCityMessage("");
           setMissingCitySuggestion(null);
           setMissingCitySelectedCandidate(null);
           setMissingCityCandidates([]);
           setCityGenerateError("");
-          errorMsg.textContent = "City name must be 10 characters or less.";
+          errorMsg.textContent = `City name must be ${CITY_SEARCH_MAX_LENGTH} characters or less.`;
           return;
         }
 
@@ -1515,7 +1612,7 @@ export default function App() {
             return;
           }
 
-          const result = await findCityAcrossCountries(raw);
+          const result = await findCityAcrossCountries(raw, countryHint);
           if (result.match) {
             setMissingCity("");
             setMissingCityMessage("");
@@ -1590,7 +1687,7 @@ export default function App() {
       const onCitySearchInput = () => {
         const raw = parseCityQuery(citySearchInput.value).city.trim();
         syncCitySearchBtnState();
-        if (!raw || raw.length > 10) {
+        if (!raw || raw.length > CITY_SEARCH_MAX_LENGTH) {
           clearCitySuggestions();
           return;
         }
@@ -1640,9 +1737,14 @@ export default function App() {
     }
 
     if (geoMakeBtn) {
+      const canCreateGeoLocationByPlan = ["basic", "premium", "premium_plus"].includes(planKey);
       const onMakeLocation = async () => {
         if (!geoContext) return;
         if (!geoContext.country || !geoContext.city) return;
+        if (!canCreateGeoLocationByPlan) {
+          errorMsg.textContent = "Your plan does not allow creating new locations.";
+          return;
+        }
 
         const fileName = countryFileMap[geoContext.country];
         if (!fileName) {
@@ -2147,6 +2249,7 @@ export default function App() {
   const planBadgeClassName = `plan-badge plan-badge--${planBadgeKey}`;
   const isPremium = planKey === "premium" || planKey === "premium_plus";
   const canGenerateCity = planKey === "trial" || planKey === "basic" || isPremium;
+  const canCreateGeoLocation = planKey === "basic" || isPremium;
   const greetingName = user?.name || user?.email || "";
   const tokenCount = user ? Number(user.tokens || 0) : null;
 
@@ -2861,8 +2964,8 @@ export default function App() {
               <input
                 id="city-search-input"
                 type="text"
-                maxLength={10}
-                placeholder="Type city (max 10)"
+                maxLength={CITY_SEARCH_MAX_LENGTH}
+                placeholder={`Type city (max ${CITY_SEARCH_MAX_LENGTH})`}
                 disabled={!(isServerReady && isServerDataReady)}
               />
               <div
@@ -3050,9 +3153,11 @@ export default function App() {
                   <div id="geo-unknown" className="geo-unknown" style={{ display: "none" }}>
                     <p id="geo-unknown-text">This Location is for me unknown.</p>
                     <div className="geo-unknown-actions">
-                      <button id="geo-make-btn" className="btn" type="button">
-                        Make this location
-                      </button>
+                      {canCreateGeoLocation && (
+                        <button id="geo-make-btn" className="btn" type="button">
+                          Make this location
+                        </button>
+                      )}
                       <button id="geo-nearest-btn" className="btn ghost" type="button">
                         Continue with nearest location
                       </button>

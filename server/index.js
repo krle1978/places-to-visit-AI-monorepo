@@ -984,7 +984,7 @@ app.get("/api/geo/reverse", async (req, res) => {
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("lat", lat.toString());
     url.searchParams.set("lon", lon.toString());
-    url.searchParams.set("zoom", "10");
+    url.searchParams.set("zoom", "16");
     url.searchParams.set("addressdetails", "1");
 
     const response = await fetch(url, {
@@ -1000,20 +1000,28 @@ app.get("/api/geo/reverse", async (req, res) => {
 
     const data = await response.json();
     const address = data?.address || {};
-    const city =
+    const cityLevel =
       address.city ||
       address.town ||
       address.village ||
       address.municipality ||
       address.county ||
       "";
+    const locality =
+      address.suburb ||
+      address.city_district ||
+      address.neighbourhood ||
+      address.quarter ||
+      address.hamlet ||
+      cityLevel;
+    const resolvedCity = locality || cityLevel;
     const country = address.country || "";
 
-    if (!city || !country) {
+    if (!resolvedCity || !country) {
       return res.status(404).json({ error: "Location not found." });
     }
 
-    return res.json({ city, country });
+    return res.json({ city: cityLevel || resolvedCity, locality: resolvedCity, country });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to resolve location." });
@@ -1059,6 +1067,10 @@ app.get("/api/geo/locate", async (req, res) => {
     const lon = Number(entry?.lon);
     const address = entry?.address || {};
     const resolvedCity =
+      address.suburb ||
+      address.city_district ||
+      address.neighbourhood ||
+      address.quarter ||
       address.city ||
       address.town ||
       address.village ||
@@ -1122,6 +1134,10 @@ app.get("/api/geo/candidates", async (req, res) => {
         const lon = Number(entry?.lon);
         const address = entry?.address || {};
         const resolvedCity =
+          address.suburb ||
+          address.city_district ||
+          address.neighbourhood ||
+          address.quarter ||
           address.city ||
           address.town ||
           address.village ||
