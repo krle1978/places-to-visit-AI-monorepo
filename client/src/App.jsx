@@ -3064,66 +3064,58 @@ export default function App() {
                         ? `Generating data for ${missingCity}...`
                         : "This city is not available in our offer. You can show the nearest city from our offer, or upgrade your plan to generate it.")}
                   </div>
-                  {!canGenerateCity && (
-                    <button className="btn ghost" type="button" onClick={openSubscriptions}>
-                      Change Your Plan
-                    </button>
+                  {!missingCitySelectedCandidate && !!missingCityCandidates.length && (
+                    <div
+                      className="city-search-suggestions city-search-candidates"
+                      role="listbox"
+                      aria-label="Choose a city"
+                    >
+                      <ul className="city-search-suggestions-list">
+                        {missingCityCandidates.map((item, idx) => (
+                          <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
+                            <a
+                              href="#"
+                              className="city-search-suggestion"
+                              title={item?.displayName || ""}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                handleMissingCityCandidateClick(item);
+                              }}
+                            >
+                              {(item?.city || "Unknown") + (item?.country ? ` (${item.country})` : "")}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                   {canGenerateCity && cityGenerateError && (
                     <div className="form-error">{cityGenerateError}</div>
                   )}
                   <div className="city-search-actions">
-                    {!missingCitySelectedCandidate && !!missingCityCandidates.length && (
-                      <div
-                        className="city-search-suggestions city-search-candidates"
-                        role="listbox"
-                        aria-label="Choose a city"
+                    {!canGenerateCity && (
+                      <button className="btn ghost" type="button" onClick={openSubscriptions}>
+                        Change Your Plan
+                      </button>
+                    )}
+                    {canGenerateCity && (
+                      <button
+                        onClick={handleMissingCityMake}
+                        disabled={!missingCitySelectedCandidate || cityGenerateLoading}
+                        className="btn"
+                        type="button"
                       >
-                        <ul className="city-search-suggestions-list">
-                          {missingCityCandidates.map((item, idx) => (
-                            <li key={`${item?.displayName || item?.city || "candidate"}-${idx}`}>
-                              <a
-                                href="#"
-                                className="city-search-suggestion"
-                                title={item?.displayName || ""}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  handleMissingCityCandidateClick(item);
-                                }}
-                              >
-                                {(item?.city || "Unknown") + (item?.country ? ` (${item.country})` : "")}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                        {cityGenerateLoading ? "Working..." : "Generate This City"}
+                      </button>
                     )}
-                    {(missingCitySelectedCandidate || !missingCityCandidates.length) && (
-                      <>
-                        {canGenerateCity && (
-                          <button
-                            onClick={handleMissingCityMake}
-                            disabled={!missingCitySelectedCandidate || cityGenerateLoading}
-                            className="btn"
-                            type="button"
-                          >
-                            {cityGenerateLoading ? "Working..." : "Generate This City"}
-                          </button>
-                        )}
-                        <button
-                          onClick={handleMissingCityNearest}
-                          disabled={
-                            !missingCitySelectedCandidate ||
-                            cityGenerateLoading ||
-                            !(isServerReady && isServerDataReady)
-                          }
-                          className="btn ghost btn-empty-image"
-                          type="button"
-                        >
-                          {cityGenerateLoading ? "Working..." : "Show nearest city"}
-                        </button>
-                      </>
-                    )}
+                    <button
+                      onClick={handleMissingCityNearest}
+                      disabled={cityGenerateLoading || !(isServerReady && isServerDataReady)}
+                      className="btn ghost btn-empty-image"
+                      type="button"
+                    >
+                      {cityGenerateLoading ? "Working..." : "Show nearest city"}
+                    </button>
                   </div>
                 </div>
               )}
