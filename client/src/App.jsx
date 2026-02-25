@@ -466,6 +466,7 @@ export default function App() {
       .replace(/-+/g, "_");
     const allowAutoNearest = !["trial", "basic", "premium", "premium_plus"].includes(planKey);
     const isPremiumPlan = planKey === "premium" || planKey === "premium_plus";
+    const canCreateGeoLocationByPlan = ["basic", "premium", "premium_plus"].includes(planKey);
 
     let countriesReadyDone = false;
     let resolveCountriesReady;
@@ -1326,9 +1327,13 @@ export default function App() {
       if (pendingSelection.allowPrompt && geoPrompt) {
         if (geoPromptText) {
           const locationLabel = [geoContext?.city, geoContext?.country].filter(Boolean).join(", ");
-          geoPromptText.textContent = locationLabel
-            ? `${locationLabel} is not in our city list yet.`
-            : "This Location is for me unknown.";
+          if (locationLabel) {
+            geoPromptText.textContent = canCreateGeoLocationByPlan
+              ? `${locationLabel} is not in our city list yet. You can generate this city now.`
+              : `${locationLabel} is not in our city list yet.`;
+          } else {
+            geoPromptText.textContent = "This Location is for me unknown.";
+          }
         }
         geoPrompt.style.display = "block";
         pendingSelection.allowPrompt = false;
@@ -1366,15 +1371,11 @@ export default function App() {
                 )}&lon=${encodeURIComponent(longitude)}`
               );
               countryName = findCountryName(data?.country) || "";
-              detectedCity = String(data?.city || data?.locality || "").trim();
+              detectedCity = String(data?.city || "").trim();
             } catch (err) {
               console.error(err);
-            }
-
-            if (!countryName || !detectedCity) {
-              const nearestFallback = await findNearestFromCoords(latitude, longitude, countryName);
-              countryName = nearestFallback.country;
-              detectedCity = nearestFallback.city;
+              errorMsg.textContent = err?.message || "Failed to resolve location.";
+              return;
             }
 
             if (!countryName) {
@@ -1402,8 +1403,7 @@ export default function App() {
               country: countryName,
               city: detectedCity,
               autoSubmit: true,
-              allowPrompt: true,
-              skipCityAlias: true
+              allowPrompt: true
             };
 
             openPlannerPanel();
@@ -1791,7 +1791,6 @@ export default function App() {
     }
 
     if (geoMakeBtn) {
-      const canCreateGeoLocationByPlan = ["basic", "premium", "premium_plus"].includes(planKey);
       const onMakeLocation = async () => {
         if (!geoContext) return;
         if (!geoContext.country || !geoContext.city) return;

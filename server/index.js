@@ -114,6 +114,12 @@ function stripParenthetical(value) {
     .trim();
 }
 
+function getGeoCity(address = {}) {
+  return String(
+    address.city || address.town || address.village || address.municipality || ""
+  ).trim();
+}
+
 function buildCityGeoKey(city, country) {
   const cityKey = normalizeName(String(city || "").trim());
   const countryKey = normalizeName(stripParenthetical(country));
@@ -1200,28 +1206,14 @@ app.get("/api/geo/reverse", async (req, res) => {
 
     const data = await response.json();
     const address = data?.address || {};
-    const cityLevel =
-      address.city ||
-      address.town ||
-      address.village ||
-      address.municipality ||
-      address.county ||
-      "";
-    const locality =
-      address.suburb ||
-      address.city_district ||
-      address.neighbourhood ||
-      address.quarter ||
-      address.hamlet ||
-      "";
-    const resolvedCity = cityLevel || locality;
+    const resolvedCity = getGeoCity(address);
     const country = address.country || "";
 
     if (!resolvedCity || !country) {
       return res.status(404).json({ error: "Location not found." });
     }
 
-    const payload = { city: resolvedCity, locality: locality || resolvedCity, country };
+    const payload = { city: resolvedCity, country };
     setReverseGeoCacheEntry(cacheKey, payload);
     return res.json(payload);
   } catch (err) {
@@ -1268,17 +1260,7 @@ app.get("/api/geo/locate", async (req, res) => {
     const lat = Number(entry?.lat);
     const lon = Number(entry?.lon);
     const address = entry?.address || {};
-    const resolvedCity =
-      address.city ||
-      address.town ||
-      address.village ||
-      address.municipality ||
-      address.county ||
-      address.suburb ||
-      address.city_district ||
-      address.neighbourhood ||
-      address.quarter ||
-      city;
+    const resolvedCity = getGeoCity(address) || city;
     const country = address.country || "";
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || !country) {
@@ -1336,18 +1318,7 @@ app.get("/api/geo/candidates", async (req, res) => {
         const lat = Number(entry?.lat);
         const lon = Number(entry?.lon);
         const address = entry?.address || {};
-        const resolvedCity =
-          address.city ||
-          address.town ||
-          address.village ||
-          address.municipality ||
-          address.county ||
-          address.suburb ||
-          address.city_district ||
-          address.neighbourhood ||
-          address.quarter ||
-          entry?.name ||
-          city;
+        const resolvedCity = getGeoCity(address) || String(entry?.name || "").trim() || city;
         const country = address.country || "";
         if (!Number.isFinite(lat) || !Number.isFinite(lon) || !country) return null;
         return {
