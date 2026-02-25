@@ -56,6 +56,9 @@ const cityGeoCache = new Map();
 const CITY_GEO_CACHE_PATH = path.join(DATA_DIR, "city_geo_cache.json");
 let cityGeoCacheLoaded = false;
 let cityGeoCacheWriteTimer = null;
+const reverseGeoCache = new Map();
+const REVERSE_GEO_CACHE_TTL_MS = Number(process.env.REVERSE_GEO_CACHE_TTL_MS || 5 * 60 * 1000);
+const REVERSE_GEO_CACHE_MAX = Number(process.env.REVERSE_GEO_CACHE_MAX || 1500);
 let offerCityIndex = null;
 let offerCityIndexPromise = null;
 let supportedCountryKeys = null;
@@ -154,6 +157,72 @@ function scheduleCityGeoCacheWrite() {
       console.error("Failed to write city geo cache.", err);
     }
   }, 1200);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url,
+  options = {},
+  retryableStatuses = [429, 500, 502, 503, 504],
+  maxRetries = 2,
+  baseDelayMs = 300
+) {
+  let lastResponse = null;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+
+      lastResponse = response;
+      const shouldRetry = retryableStatuses.includes(response.status);
+      if (!shouldRetry || attempt === maxRetries) {
+        return response;
+      }
+    } catch (err) {
+      lastError = err;
+      if (attempt === maxRetries) throw err;
+    }
+
+    const waitMs = baseDelayMs * (attempt + 1);
+    await sleep(waitMs);
+  }
+
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error("Request failed.");
+}
+
+function buildReverseGeoCacheKey(lat, lon, zoom = 16) {
+  return `${Number(lat).toFixed(4)}|${Number(lon).toFixed(4)}|${zoom}`;
+}
+
+function getReverseGeoCacheEntry(key) {
+  const cached = reverseGeoCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    reverseGeoCache.delete(key);
+    return null;
+  }
+  return cached.payload || null;
+}
+
+function setReverseGeoCacheEntry(key, payload) {
+  if (!key || !payload) return;
+
+  reverseGeoCache.set(key, {
+    payload,
+    expiresAt: Date.now() + REVERSE_GEO_CACHE_TTL_MS
+  });
+
+  while (reverseGeoCache.size > REVERSE_GEO_CACHE_MAX) {
+    const oldestKey = reverseGeoCache.keys().next().value;
+    if (!oldestKey) break;
+    reverseGeoCache.delete(oldestKey);
+  }
 }
 
 async function fetchJson(url, timeoutMs = 8000) {
@@ -975,19 +1044,26 @@ app.get("/api/geo/reverse", async (req, res) => {
   try {
     const lat = Number(req.query.lat);
     const lon = Number(req.query.lon);
+    const zoom = 16;
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return res.status(400).json({ error: "Invalid coordinates." });
+    }
+
+    const cacheKey = buildReverseGeoCacheKey(lat, lon, zoom);
+    const cached = getReverseGeoCacheEntry(cacheKey);
+    if (cached) {
+      return res.json(cached);
     }
 
     const url = new URL("https://nominatim.openstreetmap.org/reverse");
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("lat", lat.toString());
     url.searchParams.set("lon", lon.toString());
-    url.searchParams.set("zoom", "16");
+    url.searchParams.set("zoom", zoom.toString());
     url.searchParams.set("addressdetails", "1");
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         "User-Agent": "places-to-visit-ai/1.0",
         "Accept-Language": "en"
@@ -995,6 +1071,9 @@ app.get("/api/geo/reverse", async (req, res) => {
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        return res.status(503).json({ error: "Failed to resolve location." });
+      }
       return res.status(502).json({ error: "Failed to resolve location." });
     }
 
@@ -1013,15 +1092,17 @@ app.get("/api/geo/reverse", async (req, res) => {
       address.neighbourhood ||
       address.quarter ||
       address.hamlet ||
-      cityLevel;
-    const resolvedCity = locality || cityLevel;
+      "";
+    const resolvedCity = cityLevel || locality;
     const country = address.country || "";
 
     if (!resolvedCity || !country) {
       return res.status(404).json({ error: "Location not found." });
     }
 
-    return res.json({ city: cityLevel || resolvedCity, locality: resolvedCity, country });
+    const payload = { city: resolvedCity, locality: locality || resolvedCity, country };
+    setReverseGeoCacheEntry(cacheKey, payload);
+    return res.json(payload);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to resolve location." });
@@ -1050,7 +1131,7 @@ app.get("/api/geo/locate", async (req, res) => {
     }
     url.searchParams.set("addressdetails", "1");
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         "User-Agent": "places-to-visit-ai/1.0",
         "Accept-Language": "en"
@@ -1067,15 +1148,15 @@ app.get("/api/geo/locate", async (req, res) => {
     const lon = Number(entry?.lon);
     const address = entry?.address || {};
     const resolvedCity =
-      address.suburb ||
-      address.city_district ||
-      address.neighbourhood ||
-      address.quarter ||
       address.city ||
       address.town ||
       address.village ||
       address.municipality ||
       address.county ||
+      address.suburb ||
+      address.city_district ||
+      address.neighbourhood ||
+      address.quarter ||
       city;
     const country = address.country || "";
 
@@ -1116,7 +1197,7 @@ app.get("/api/geo/candidates", async (req, res) => {
       url.searchParams.set("city", city);
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         "User-Agent": "places-to-visit-ai/1.0",
         "Accept-Language": "en"
@@ -1134,15 +1215,15 @@ app.get("/api/geo/candidates", async (req, res) => {
         const lon = Number(entry?.lon);
         const address = entry?.address || {};
         const resolvedCity =
-          address.suburb ||
-          address.city_district ||
-          address.neighbourhood ||
-          address.quarter ||
           address.city ||
           address.town ||
           address.village ||
           address.municipality ||
           address.county ||
+          address.suburb ||
+          address.city_district ||
+          address.neighbourhood ||
+          address.quarter ||
           entry?.name ||
           city;
         const country = address.country || "";

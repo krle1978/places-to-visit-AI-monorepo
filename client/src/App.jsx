@@ -1223,6 +1223,48 @@ export default function App() {
       return { country: nearestCountry, city: cityName };
     }
 
+    async function findNearestFromCoords(latitude, longitude, preferredCountryName = "") {
+      await countriesReady;
+      const preferredCountry = findCountryName(preferredCountryName) || "";
+      const preferredFile = preferredCountry ? countryFileMap[preferredCountry] : "";
+      let nearest = null;
+
+      if (preferredFile) {
+        try {
+          nearest = await fetchJsonWithFallback(
+            `/api/geo/nearest?lat=${encodeURIComponent(
+              latitude
+            )}&lon=${encodeURIComponent(longitude)}&file=${encodeURIComponent(preferredFile)}`
+          );
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      if (!nearest?.city) {
+        nearest = await fetchJsonWithFallback(
+          `/api/geo/nearest?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
+        );
+      }
+
+      const cityName = String(nearest?.city || "").trim();
+      if (!cityName) {
+        throw new Error("No nearby city found.");
+      }
+
+      const countryFromFile =
+        (nearest?.file &&
+          Object.entries(countryFileMap).find(([, file]) => file === nearest.file)?.[0]) ||
+        "";
+      const nearestCountry = countryFromFile || preferredCountry;
+
+      if (!nearestCountry) {
+        throw new Error("No matching country found.");
+      }
+
+      return { country: nearestCountry, city: cityName };
+    }
+
     async function applyPendingCitySelection() {
       if (!pendingSelection) return;
       if (pendingSelection.country && countrySelect.value !== pendingSelection.country) return;
@@ -1314,14 +1356,26 @@ export default function App() {
         async (pos) => {
           try {
             const { latitude, longitude } = pos.coords;
-            const data = await fetchJsonWithFallback(
-              `/api/geo/reverse?lat=${encodeURIComponent(
-                latitude
-              )}&lon=${encodeURIComponent(longitude)}`
-            );
+            let countryName = "";
+            let detectedCity = "";
 
-            const countryName = findCountryName(data?.country);
-            const detectedCity = String(data?.locality || data?.city || "").trim();
+            try {
+              const data = await fetchJsonWithFallback(
+                `/api/geo/reverse?lat=${encodeURIComponent(
+                  latitude
+                )}&lon=${encodeURIComponent(longitude)}`
+              );
+              countryName = findCountryName(data?.country) || "";
+              detectedCity = String(data?.city || data?.locality || "").trim();
+            } catch (err) {
+              console.error(err);
+            }
+
+            if (!countryName || !detectedCity) {
+              const nearestFallback = await findNearestFromCoords(latitude, longitude, countryName);
+              countryName = nearestFallback.country;
+              detectedCity = nearestFallback.city;
+            }
 
             if (!countryName) {
               errorMsg.textContent = "No matching country found.";
@@ -2018,30 +2072,17 @@ export default function App() {
         throw new Error("Invalid coordinates.");
       }
 
-      const geo = await fetchJsonWithFallback(
-        `/api/geo/reverse?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
-      );
-      const countryName = findCountryName(geo?.country);
-      if (!countryName) {
-        throw new Error("No matching country found.");
+      let countryName = "";
+      try {
+        const geo = await fetchJsonWithFallback(
+          `/api/geo/reverse?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
+        );
+        countryName = findCountryName(geo?.country) || "";
+      } catch (err) {
+        console.error(err);
       }
 
-      const fileName = countryFileMap[countryName];
-      if (!fileName) {
-        throw new Error("No data file for selected country.");
-      }
-
-      const nearest = await fetchJsonWithFallback(
-        `/api/geo/nearest?lat=${encodeURIComponent(
-          latitude
-        )}&lon=${encodeURIComponent(longitude)}&file=${encodeURIComponent(fileName)}`
-      );
-      const cityName = nearest?.city;
-      if (!cityName) {
-        throw new Error("No nearby city found.");
-      }
-
-      return { country: countryName, city: cityName };
+      return findNearestFromCoords(latitude, longitude, countryName);
     };
 
     document.dispatchEvent(new Event("routePlanner:ready"));
