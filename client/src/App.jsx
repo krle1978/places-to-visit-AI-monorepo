@@ -467,6 +467,11 @@ export default function App() {
     const allowAutoNearest = !["trial", "basic", "premium", "premium_plus"].includes(planKey);
     const isPremiumPlan = planKey === "premium" || planKey === "premium_plus";
     const canCreateGeoLocationByPlan = ["basic", "premium", "premium_plus"].includes(planKey);
+    const GEOLOCATION_OPTIONS = {
+      enableHighAccuracy: false,
+      timeout: 20000,
+      maximumAge: 60000
+    };
 
     let countriesReadyDone = false;
     let resolveCountriesReady;
@@ -1340,6 +1345,20 @@ export default function App() {
       }
     }
 
+    function getGeolocationErrorMessage(err) {
+      const code = Number(err?.code);
+      if (code === 1) {
+        return "Location permission is blocked. Allow location access in browser settings and try again.";
+      }
+      if (code === 2) {
+        return "Location is currently unavailable. Turn on GPS/mobile location and try again.";
+      }
+      if (code === 3) {
+        return "Location request timed out. Try again where GPS signal is stronger.";
+      }
+      return err?.message || "Unable to access location.";
+    }
+
     async function resolveGeoLocation() {
       if (!isPlannerReady()) return;
       if (!gpsBtn || isGeoLoading) return;
@@ -1428,7 +1447,7 @@ export default function App() {
         },
         (err) => {
           console.error(err);
-          errorMsg.textContent = "Unable to access location.";
+          errorMsg.textContent = getGeolocationErrorMessage(err);
           isGeoLoading = false;
           if (gpsImg) {
             gpsImg.dataset.locked = isPlannerReady() ? "false" : "true";
@@ -1436,7 +1455,7 @@ export default function App() {
             gpsBtn.dataset.locked = isPlannerReady() ? "false" : "true";
           }
         },
-        { enableHighAccuracy: false, timeout: 10000 }
+        GEOLOCATION_OPTIONS
       );
     }
 
@@ -2060,10 +2079,11 @@ export default function App() {
       }
 
       const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: false,
-          timeout: 10000
-        });
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          (err) => reject(new Error(getGeolocationErrorMessage(err))),
+          GEOLOCATION_OPTIONS
+        );
       });
 
       const { latitude, longitude } = position.coords || {};
