@@ -3110,7 +3110,11 @@ export default function App() {
                     )}
                     <button
                       onClick={handleMissingCityNearest}
-                      disabled={cityGenerateLoading || !(isServerReady && isServerDataReady)}
+                      disabled={
+                        !missingCitySelectedCandidate ||
+                        cityGenerateLoading ||
+                        !(isServerReady && isServerDataReady)
+                      }
                       className="btn ghost btn-empty-image"
                       type="button"
                     >
