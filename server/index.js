@@ -61,6 +61,8 @@ const REVERSE_GEO_CACHE_TTL_MS = Number(process.env.REVERSE_GEO_CACHE_TTL_MS || 
 const REVERSE_GEO_CACHE_MAX = Number(process.env.REVERSE_GEO_CACHE_MAX || 1500);
 let offerCityIndex = null;
 let offerCityIndexPromise = null;
+let countryNameByFileMap = null;
+let countryNameByFileMapPromise = null;
 let supportedCountryKeys = null;
 let supportedCountryKeysPromise = null;
 const smtpPort = Number(process.env.SMTP_PORT || 587);
@@ -406,6 +408,30 @@ async function getOfferCityIndex() {
   return offerCityIndexPromise;
 }
 
+async function getCountryNameByFileMap() {
+  if (countryNameByFileMap) return countryNameByFileMap;
+  if (countryNameByFileMapPromise) return countryNameByFileMapPromise;
+
+  countryNameByFileMapPromise = (async () => {
+    const map = new Map();
+    const documents = await countriesStore.readAllCountryDocuments();
+    for (const document of documents) {
+      try {
+        const countryName = String(document?.payload?.name || "").trim();
+        if (!countryName || !document?.file) continue;
+        map.set(document.file, countryName);
+      } catch (err) {
+        console.error(`Failed to read country record: ${document?.file || "unknown"}`, err);
+      }
+    }
+    countryNameByFileMap = map;
+    countryNameByFileMapPromise = null;
+    return map;
+  })();
+
+  return countryNameByFileMapPromise;
+}
+
 async function cityExistsInFile(fileName, cityName) {
   const resolved = resolveCountryFile(fileName);
   if (resolved.error) return null;
@@ -495,6 +521,101 @@ const EUROPE_COUNTRY_KEYS = new Set(
 function resolveCountryAlias(input) {
   const key = normalizeKey(input);
   return COUNTRY_ALIASES[key] || input;
+}
+
+function isEuropeanGeoCountry(countryName, lon) {
+  const resolvedName = resolveCountryAlias(countryName);
+  const countryKey = normalizeKey(stripParenthetical(resolvedName));
+  if (!EUROPE_COUNTRY_KEYS.has(countryKey)) return false;
+  if (countryKey === "turkey" && Number(lon) > 30.5) return false;
+  if (countryKey === "russia" && Number(lon) > 60) return false;
+  return true;
+}
+
+function countryMatchesHint(countryName, countryHint) {
+  const hint = String(countryHint || "").trim();
+  if (!hint) return true;
+
+  const resolvedCountry = resolveCountryAlias(countryName);
+  const resolvedHint = resolveCountryAlias(hint);
+  const countryVariants = [
+    normalizeName(resolvedCountry),
+    normalizeName(stripParenthetical(resolvedCountry)),
+    normalizeKey(resolvedCountry),
+    normalizeKey(stripParenthetical(resolvedCountry))
+  ].filter(Boolean);
+  const hintVariants = [
+    normalizeName(resolvedHint),
+    normalizeName(stripParenthetical(resolvedHint)),
+    normalizeKey(resolvedHint),
+    normalizeKey(stripParenthetical(resolvedHint))
+  ].filter(Boolean);
+
+  return hintVariants.some((hintValue) =>
+    countryVariants.some(
+      (countryValue) =>
+        countryValue === hintValue ||
+        countryValue.startsWith(hintValue) ||
+        hintValue.startsWith(countryValue)
+    )
+  );
+}
+
+async function findGeoCandidatesFromLocalIndex(cityQuery, countryHint = "", limit = 8) {
+  const raw = String(cityQuery || "").trim();
+  if (!raw) return [];
+  const normalizedQuery = normalizeName(raw);
+  const normalizedQueryKey = normalizeKey(raw);
+
+  const [index, fileToCountry] = await Promise.all([getOfferCityIndex(), getCountryNameByFileMap()]);
+  const seen = new Set();
+  const ranked = [];
+
+  for (const entry of index) {
+    const cityName = String(entry?.city || "").trim();
+    const countryName = String(fileToCountry.get(entry?.file) || "").trim();
+    const lat = Number(entry?.lat);
+    const lon = Number(entry?.lon);
+    if (!cityName || !countryName || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (!countryMatchesHint(countryName, countryHint)) continue;
+    if (!isEuropeanGeoCountry(countryName, lon)) continue;
+
+    const normalizedCity = normalizeName(cityName);
+    const normalizedCityKey = normalizeKey(cityName);
+    let score = Infinity;
+
+    if (normalizedCity === normalizedQuery || normalizedCityKey === normalizedQueryKey) {
+      score = 0;
+    } else if (normalizedCity.startsWith(normalizedQuery)) {
+      score = 1;
+    } else if (normalizedCity.includes(normalizedQuery)) {
+      score = 2;
+    } else if (normalizedQuery && normalizedQuery.includes(normalizedCity)) {
+      score = 3;
+    }
+
+    if (!Number.isFinite(score)) continue;
+
+    const dedupeKey = `${normalizedCityKey}|${normalizeKey(countryName)}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    ranked.push({
+      score,
+      city: cityName,
+      country: countryName,
+      lat,
+      lon,
+      displayName: `${cityName}, ${countryName}`
+    });
+  }
+
+  ranked.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.city.localeCompare(b.city);
+  });
+
+  return ranked.slice(0, limit).map(({ score, ...candidate }) => candidate);
 }
 
 async function readJsonFile(filePath, fallback) {
@@ -1205,7 +1326,8 @@ app.get("/api/geo/candidates", async (req, res) => {
     });
 
     if (!response.ok) {
-      return res.status(502).json({ error: "Failed to resolve location." });
+      const fallbackCandidates = await findGeoCandidatesFromLocalIndex(city, countryHint, safeLimit);
+      return res.json({ candidates: fallbackCandidates });
     }
 
     const data = await response.json();
@@ -1238,21 +1360,25 @@ app.get("/api/geo/candidates", async (req, res) => {
       })
       .filter(Boolean);
 
-    const filtered = candidates.filter((candidate) => {
-      const countryName = resolveCountryAlias(candidate.country);
-      const countryKey = normalizeKey(stripParenthetical(countryName));
-      if (!EUROPE_COUNTRY_KEYS.has(countryKey)) return false;
-
-      if (countryKey === "turkey" && Number(candidate.lon) > 30.5) return false;
-      if (countryKey === "russia" && Number(candidate.lon) > 60) return false;
-
-      return true;
-    });
+    const filtered = candidates.filter((candidate) =>
+      isEuropeanGeoCountry(candidate.country, candidate.lon)
+    );
 
     return res.json({ candidates: filtered });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Failed to resolve location." });
+    try {
+      const city = String(req.query.city || "").trim();
+      const countryHint = String(req.query.country || "").trim();
+      const limitRaw = Number(req.query.limit);
+      const limit = Number.isFinite(limitRaw) ? Math.round(limitRaw) : 8;
+      const safeLimit = Math.min(Math.max(limit, 1), 25);
+      const fallbackCandidates = await findGeoCandidatesFromLocalIndex(city, countryHint, safeLimit);
+      return res.json({ candidates: fallbackCandidates });
+    } catch (fallbackErr) {
+      console.error(fallbackErr);
+      return res.status(500).json({ error: "Failed to resolve location." });
+    }
   }
 });
 
