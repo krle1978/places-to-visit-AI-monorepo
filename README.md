@@ -4,6 +4,9 @@
 - client: Frontend (Vite/React)
 - server: Backend (Node/Express)
 
+## UI element index
+- Frontend element locator (IDs/classes + logic/style hooks): [client/ELEMENT_INDEX.md](client/ELEMENT_INDEX.md)
+
 ## Run locally
 
 ### Client
