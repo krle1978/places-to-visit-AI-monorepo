@@ -29,7 +29,7 @@ const PAYPAL_MERCHANT_ID = process.env.PAYPAL_MERCHANT_ID || "";
 
 const PLAN_RANK = {
   free: 0,
-  trial: 1,
+  trial: 0.5,
   basic: 1,
   premium: 2,
   premium_plus: 3

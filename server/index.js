@@ -438,6 +438,48 @@ async function getCountryNameByFileMap() {
   return countryNameByFileMapPromise;
 }
 
+async function findNearestOfferCityForCoords(latitude, longitude, preferredFile = "") {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+  const [index, fileToCountry] = await Promise.all([getOfferCityIndex(), getCountryNameByFileMap()]);
+  const candidates = preferredFile
+    ? index.filter((entry) => entry?.file === preferredFile)
+    : index;
+
+  if (!candidates.length) return null;
+
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (const entry of candidates) {
+    const entryLat = Number(entry?.lat);
+    const entryLon = Number(entry?.lon);
+    if (!Number.isFinite(entryLat) || !Number.isFinite(entryLon) || !entry?.city || !entry?.file) {
+      continue;
+    }
+
+    const distanceKm = haversineKm(lat, lon, entryLat, entryLon);
+    if (distanceKm < bestDistance) {
+      best = entry;
+      bestDistance = distanceKm;
+    }
+  }
+
+  if (!best?.city || !best?.file || !Number.isFinite(bestDistance)) return null;
+
+  const country = String(fileToCountry.get(best.file) || "").trim();
+  if (!country) return null;
+
+  return {
+    city: best.city,
+    country,
+    file: best.file,
+    distanceKm: bestDistance
+  };
+}
+
 async function cityExistsInFile(fileName, cityName) {
   const resolved = resolveCountryFile(fileName);
   if (resolved.error) return null;
@@ -891,7 +933,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 const PLAN_RANK = {
   free: 0,
-  trial: 1,
+  trial: 0.5,
   basic: 1,
   premium: 2,
   premium_plus: 3
@@ -1183,6 +1225,19 @@ app.get("/api/geo/reverse", async (req, res) => {
       return res.json(cached);
     }
 
+    const tryLocalFallback = async () => {
+      const fallback = await findNearestOfferCityForCoords(lat, lon);
+      if (!fallback?.city || !fallback?.country) return null;
+
+      const payload = { city: fallback.city, country: fallback.country };
+      setReverseGeoCacheEntry(cacheKey, payload);
+      return res.json({
+        ...payload,
+        distanceKm: fallback.distanceKm,
+        source: "nearest-offer-fallback"
+      });
+    };
+
     const url = new URL("https://nominatim.openstreetmap.org/reverse");
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("lat", lat.toString());
@@ -1198,6 +1253,8 @@ app.get("/api/geo/reverse", async (req, res) => {
     });
 
     if (!response.ok) {
+      const fallbackResponse = await tryLocalFallback();
+      if (fallbackResponse) return fallbackResponse;
       if (response.status === 429) {
         return res.status(503).json({ error: "Failed to resolve location." });
       }
@@ -1210,6 +1267,8 @@ app.get("/api/geo/reverse", async (req, res) => {
     const country = address.country || "";
 
     if (!resolvedCity || !country) {
+      const fallbackResponse = await tryLocalFallback();
+      if (fallbackResponse) return fallbackResponse;
       return res.status(404).json({ error: "Location not found." });
     }
 
@@ -1218,6 +1277,24 @@ app.get("/api/geo/reverse", async (req, res) => {
     return res.json(payload);
   } catch (err) {
     console.error(err);
+    try {
+      const lat = Number(req.query.lat);
+      const lon = Number(req.query.lon);
+      const zoom = 16;
+      const cacheKey = buildReverseGeoCacheKey(lat, lon, zoom);
+      const fallback = await findNearestOfferCityForCoords(lat, lon);
+      if (fallback?.city && fallback?.country) {
+        const payload = { city: fallback.city, country: fallback.country };
+        setReverseGeoCacheEntry(cacheKey, payload);
+        return res.json({
+          ...payload,
+          distanceKm: fallback.distanceKm,
+          source: "nearest-offer-fallback"
+        });
+      }
+    } catch (fallbackErr) {
+      console.error(fallbackErr);
+    }
     return res.status(500).json({ error: "Failed to resolve location." });
   }
 });

@@ -22,7 +22,7 @@ const CITY_ALIASES_BY_COUNTRY = {
 const CONNECTING_TIPS = [
   "On mobile, tap “Explore My location!” and allow location access to discover nearby cities.",
   "Create an account to start your plan and unlock benefits with Basic and Premium.",
-  `New accounts start in Trial with ${TRIAL_TOKENS} tokens to try generating cities.`,
+  `New accounts start in Trial with ${TRIAL_TOKENS} tokens.`,
   "Use the city search box to quickly find a city—try “Paris” or “Paris, France”.",
   "Use the suggestions under the search box to avoid typos and get better matches.",
   "Switch countries in the planner to explore different destinations and route ideas.",
@@ -1359,6 +1359,39 @@ export default function App() {
       return err?.message || "Unable to access location.";
     }
 
+    async function fetchReverseGeoCityCountry(latitude, longitude, retries = 1) {
+      let lastErr = null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const data = await fetchJsonWithFallback(
+            `/api/geo/reverse?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
+          );
+          const countryName = findCountryName(data?.country) || "";
+          const detectedCity = String(data?.city || "").trim();
+
+          if (!countryName) {
+            throw new Error("No matching country found.");
+          }
+          if (!detectedCity) {
+            throw new Error("No matching city found.");
+          }
+
+          return { countryName, detectedCity };
+        } catch (err) {
+          lastErr = err;
+          if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, 600));
+          }
+        }
+      }
+
+      const message = String(lastErr?.message || "").toLowerCase();
+      if (message.includes("failed to resolve location") || message.includes("request failed")) {
+        throw new Error("Location service is temporarily unavailable. Please try again.");
+      }
+      throw lastErr || new Error("Failed to resolve location.");
+    }
+
     async function resolveGeoLocation() {
       if (!isPlannerReady()) return;
       if (!gpsBtn || isGeoLoading) return;
@@ -1380,31 +1413,11 @@ export default function App() {
         async (pos) => {
           try {
             const { latitude, longitude } = pos.coords;
-            let countryName = "";
-            let detectedCity = "";
-
-            try {
-              const data = await fetchJsonWithFallback(
-                `/api/geo/reverse?lat=${encodeURIComponent(
-                  latitude
-                )}&lon=${encodeURIComponent(longitude)}`
-              );
-              countryName = findCountryName(data?.country) || "";
-              detectedCity = String(data?.city || "").trim();
-            } catch (err) {
-              console.error(err);
-              errorMsg.textContent = err?.message || "Failed to resolve location.";
-              return;
-            }
-
-            if (!countryName) {
-              errorMsg.textContent = "No matching country found.";
-              return;
-            }
-            if (!detectedCity) {
-              errorMsg.textContent = "No matching city found.";
-              return;
-            }
+            const { countryName, detectedCity } = await fetchReverseGeoCityCountry(
+              latitude,
+              longitude,
+              1
+            );
 
             if (citySearchInput) {
               citySearchInput.value = detectedCity.slice(0, CITY_SEARCH_MAX_LENGTH);
@@ -1480,7 +1493,7 @@ export default function App() {
     }
 
     if (citySearchInput && citySearchBtn) {
-      const canGenerateCity = ["trial", "basic", "premium", "premium_plus"].includes(planKey);
+      const canGenerateCity = ["basic", "premium", "premium_plus"].includes(planKey);
       let suggestTimer = null;
       let suggestRequestId = 0;
       const citySearchImg = citySearchBtn.querySelector("img.stateful-btn-image");
@@ -2308,7 +2321,7 @@ export default function App() {
   const planBadgeKey = safePlanKey === "premium_plus" ? "premium-plus" : safePlanKey;
   const planBadgeClassName = `plan-badge plan-badge--${planBadgeKey}`;
   const isPremium = planKey === "premium" || planKey === "premium_plus";
-  const canGenerateCity = planKey === "trial" || planKey === "basic" || isPremium;
+  const canGenerateCity = planKey === "basic" || isPremium;
   const canCreateGeoLocation = planKey === "basic" || isPremium;
   const greetingName = user?.name || user?.email || "";
   const tokenCount = user ? Number(user.tokens || 0) : null;
