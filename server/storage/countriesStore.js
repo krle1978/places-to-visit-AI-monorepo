@@ -33,10 +33,11 @@ function shouldUseSsl(databaseUrl) {
 export function createCountriesStore({ countriesDir, databaseUrl }) {
   const normalizedDir = path.resolve(countriesDir);
   const dbUrl = String(databaseUrl || "").trim();
-  const useDatabase = Boolean(dbUrl);
+  let useDatabase = Boolean(dbUrl);
   let pool = null;
   let initPromise = null;
   let initialized = false;
+  const DB_INIT_MAX_ATTEMPTS = 2;
 
   async function readDiskCountry(fileName) {
     const fullPath = path.join(normalizedDir, fileName);
@@ -77,49 +78,77 @@ export function createCountriesStore({ countriesDir, databaseUrl }) {
         return { mode: "file", seeded: 0 };
       }
 
-      pool = new Pool({
-        connectionString: dbUrl,
-        ssl: shouldUseSsl(dbUrl) ? { rejectUnauthorized: false } : false
-      });
+      let lastInitError = null;
+      for (let attempt = 1; attempt <= DB_INIT_MAX_ATTEMPTS; attempt += 1) {
+        const candidatePool = new Pool({
+          connectionString: dbUrl,
+          ssl: shouldUseSsl(dbUrl) ? { rejectUnauthorized: false } : false
+        });
+        pool = candidatePool;
 
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS country_documents (
-          file_name TEXT PRIMARY KEY,
-          country_name TEXT NOT NULL,
-          payload JSONB NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_country_documents_country_name_lower
-        ON country_documents ((lower(country_name)))
-      `);
+        try {
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS country_documents (
+              file_name TEXT PRIMARY KEY,
+              country_name TEXT NOT NULL,
+              payload JSONB NOT NULL,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+          `);
+          await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_country_documents_country_name_lower
+            ON country_documents ((lower(country_name)))
+          `);
 
-      let seeded = 0;
-      const countResult = await pool.query("SELECT COUNT(*)::int AS count FROM country_documents");
-      const count = Number(countResult.rows?.[0]?.count || 0);
-      if (count === 0) {
-        const seedRows = await listDiskCountryEntries();
-        for (const row of seedRows) {
-          await pool.query(
-            `
-              INSERT INTO country_documents (file_name, country_name, payload, updated_at)
-              VALUES ($1, $2, $3::jsonb, NOW())
-              ON CONFLICT (file_name)
-              DO UPDATE SET
-                country_name = EXCLUDED.country_name,
-                payload = EXCLUDED.payload,
-                updated_at = NOW()
-            `,
-            [row.file, row.name, JSON.stringify(row.payload)]
+          let seeded = 0;
+          const countResult = await pool.query(
+            "SELECT COUNT(*)::int AS count FROM country_documents"
           );
-        }
-        seeded = seedRows.length;
-      }
+          const count = Number(countResult.rows?.[0]?.count || 0);
+          if (count === 0) {
+            const seedRows = await listDiskCountryEntries();
+            for (const row of seedRows) {
+              await pool.query(
+                `
+                  INSERT INTO country_documents (file_name, country_name, payload, updated_at)
+                  VALUES ($1, $2, $3::jsonb, NOW())
+                  ON CONFLICT (file_name)
+                  DO UPDATE SET
+                    country_name = EXCLUDED.country_name,
+                    payload = EXCLUDED.payload,
+                    updated_at = NOW()
+                `,
+                [row.file, row.name, JSON.stringify(row.payload)]
+              );
+            }
+            seeded = seedRows.length;
+          }
 
+          initialized = true;
+          initPromise = null;
+          return { mode: "postgres", seeded };
+        } catch (err) {
+          lastInitError = err;
+          console.error(
+            `Countries storage database init attempt ${attempt}/${DB_INIT_MAX_ATTEMPTS} failed.`,
+            err
+          );
+          try {
+            await candidatePool.end();
+          } catch {
+            // No-op: pool may already be closed or never opened.
+          }
+          if (pool === candidatePool) pool = null;
+        }
+      }
+      useDatabase = false;
       initialized = true;
       initPromise = null;
-      return { mode: "postgres", seeded };
+      console.warn(
+        `Countries storage falling back to local JSON after ${DB_INIT_MAX_ATTEMPTS} failed database init attempts.`,
+        lastInitError?.message || lastInitError || ""
+      );
+      return { mode: "file", seeded: 0 };
     })().catch((err) => {
       initPromise = null;
       throw err;

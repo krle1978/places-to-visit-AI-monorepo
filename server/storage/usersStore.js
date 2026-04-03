@@ -49,11 +49,12 @@ export function createUsersStore({ dataDir, databaseUrl }) {
   const usersPath = path.join(normalizedDataDir, "users.json");
   const pendingUsersPath = path.join(normalizedDataDir, "pending_users.json");
   const dbUrl = String(databaseUrl || "").trim();
-  const useDatabase = Boolean(dbUrl);
+  let useDatabase = Boolean(dbUrl);
 
   let pool = null;
   let initPromise = null;
   let initialized = false;
+  const DB_INIT_MAX_ATTEMPTS = 2;
 
   async function readJsonFile(filePath, fallback) {
     try {
@@ -175,63 +176,90 @@ export function createUsersStore({ dataDir, databaseUrl }) {
         return { mode: "file", seededUsers: 0, seededPending: 0 };
       }
 
-      pool = new Pool({
-        connectionString: dbUrl,
-        ssl: shouldUseSsl(dbUrl) ? { rejectUnauthorized: false } : false
-      });
+      let lastInitError = null;
+      for (let attempt = 1; attempt <= DB_INIT_MAX_ATTEMPTS; attempt += 1) {
+        const candidatePool = new Pool({
+          connectionString: dbUrl,
+          ssl: shouldUseSsl(dbUrl) ? { rejectUnauthorized: false } : false
+        });
+        pool = candidatePool;
 
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS app_users (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          email TEXT NOT NULL UNIQUE,
-          password_hash TEXT NOT NULL,
-          plan TEXT NOT NULL DEFAULT 'free',
-          tokens INTEGER NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_app_users_email_lower
-        ON app_users ((lower(email)))
-      `);
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_app_users_name_lower
-        ON app_users ((lower(name)))
-      `);
+        try {
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS app_users (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              email TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              plan TEXT NOT NULL DEFAULT 'free',
+              tokens INTEGER NOT NULL DEFAULT 0,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+          `);
+          await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_app_users_email_lower
+            ON app_users ((lower(email)))
+          `);
+          await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_app_users_name_lower
+            ON app_users ((lower(name)))
+          `);
 
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS pending_user_signups (
-          token TEXT PRIMARY KEY,
-          id TEXT NOT NULL,
-          name TEXT NOT NULL,
-          email TEXT NOT NULL,
-          password_hash TEXT NOT NULL,
-          plan TEXT NOT NULL DEFAULT 'trial',
-          tokens INTEGER NOT NULL DEFAULT 3,
-          email_send_attempts INTEGER NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          last_email_sent_at TIMESTAMPTZ,
-          last_email_error_at TIMESTAMPTZ,
-          last_email_error TEXT
-        )
-      `);
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_pending_signups_email_lower
-        ON pending_user_signups ((lower(email)))
-      `);
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_pending_signups_name_lower
-        ON pending_user_signups ((lower(name)))
-      `);
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS pending_user_signups (
+              token TEXT PRIMARY KEY,
+              id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              email TEXT NOT NULL,
+              password_hash TEXT NOT NULL,
+              plan TEXT NOT NULL DEFAULT 'trial',
+              tokens INTEGER NOT NULL DEFAULT 3,
+              email_send_attempts INTEGER NOT NULL DEFAULT 0,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              last_email_sent_at TIMESTAMPTZ,
+              last_email_error_at TIMESTAMPTZ,
+              last_email_error TEXT
+            )
+          `);
+          await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_pending_signups_email_lower
+            ON pending_user_signups ((lower(email)))
+          `);
+          await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_pending_signups_name_lower
+            ON pending_user_signups ((lower(name)))
+          `);
 
-      const seededUsers = await seedUsersIfNeeded();
-      const seededPending = await seedPendingIfNeeded();
+          const seededUsers = await seedUsersIfNeeded();
+          const seededPending = await seedPendingIfNeeded();
 
+          initialized = true;
+          initPromise = null;
+          return { mode: "postgres", seededUsers, seededPending };
+        } catch (err) {
+          lastInitError = err;
+          console.error(
+            `Users storage database init attempt ${attempt}/${DB_INIT_MAX_ATTEMPTS} failed.`,
+            err
+          );
+          try {
+            await candidatePool.end();
+          } catch {
+            // No-op: pool may already be closed or never opened.
+          }
+          if (pool === candidatePool) pool = null;
+        }
+      }
+
+      useDatabase = false;
       initialized = true;
       initPromise = null;
-      return { mode: "postgres", seededUsers, seededPending };
+      console.warn(
+        `Users storage falling back to local JSON after ${DB_INIT_MAX_ATTEMPTS} failed database init attempts.`,
+        lastInitError?.message || lastInitError || ""
+      );
+      return { mode: "file", seededUsers: 0, seededPending: 0 };
     })().catch((err) => {
       initPromise = null;
       throw err;
